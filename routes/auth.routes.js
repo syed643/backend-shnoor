@@ -14,7 +14,11 @@ const router = express.Router();
 router.post("/register", register);
 
 
-router.post("/login", login);
+router.post(
+  "/login",
+  firebaseAuth,   // 🔑 VERIFY TOKEN HERE
+  login           // ✅ USE req.firebase
+);
 
 
 router.post(
