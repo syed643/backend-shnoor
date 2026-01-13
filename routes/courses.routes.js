@@ -1,0 +1,61 @@
+import express from "express";
+import {
+  addCourse,
+  approveCourse,
+  getPendingCourses,
+  getApprovedCourses,
+  getInstructorCourses,
+} from "../controllers/course.controller.js";
+
+import firebaseAuth from "../middlewares/firebaseAuth.js";
+import attachUser from "../middlewares/attachUser.js";
+import roleGuard from "../middlewares/roleGuard.js";
+
+const router = express.Router();
+
+
+router.post(
+  "/",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  addCourse
+);
+
+
+router.get(
+  "/instructor",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  getInstructorCourses
+);
+
+
+router.get(
+  "/pending",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  getPendingCourses
+);
+
+
+router.patch(
+  "/:courseId/approve",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  approveCourse
+);
+
+
+router.get(
+  "/approved",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  getApprovedCourses
+);
+
+export default router;

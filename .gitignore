@@ -1,0 +1,12 @@
+# environment files
+.env
+.env.*
+
+# firebase
+service-key.json
+
+# node
+node_modules/
+
+# logs
+npm-debug.log*
