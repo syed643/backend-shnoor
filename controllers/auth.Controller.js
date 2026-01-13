@@ -62,17 +62,8 @@ export const register = async (req, res) => {
 ========================= */
 export const login = async (req, res) => {
   try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        message: "Firebase ID token is required",
-      });
-    }
-
-    // Verify Firebase token
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    const firebaseUid = decodedToken.uid;
+    // ✅ Token already verified by firebaseAuth middleware
+    const { uid: firebaseUid } = req.firebase;
 
     // Fetch user from DB
     const result = await pool.query(
@@ -97,7 +88,7 @@ export const login = async (req, res) => {
       });
     }
 
-    // 🚫 Block inactive / blocked users (future-proof)
+    // 🚫 Block inactive / blocked users
     if (user.status !== "active") {
       return res.status(403).json({
         message: "Your account is blocked. Contact admin.",
@@ -105,17 +96,18 @@ export const login = async (req, res) => {
     }
 
     // ✅ Login allowed
-    res.status(200).json({
+    return res.status(200).json({
       message: "Login successful",
       user,
     });
   } catch (error) {
     console.error("authController login error:", error);
-    res.status(401).json({
-      message: "Invalid or expired Firebase token",
+    return res.status(500).json({
+      message: "Server error",
     });
   }
 };
+
 
 /* =========================
    LOGOUT CONTROLLER
