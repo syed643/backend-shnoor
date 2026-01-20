@@ -1,14 +1,11 @@
 import pool from "../../db/postgres.js";
-/**
- * Instructor adds CODING question
- */
 export const addCodingQuestion = async (req, res) => {
   const client = await pool.connect();
 
   try {
     console.log("CODING PAYLOAD >>>", JSON.stringify(req.body, null, 2));
-    const { examId } = req.params;
 
+    const { examId } = req.params;
     const {
       title,
       description,
@@ -19,15 +16,30 @@ export const addCodingQuestion = async (req, res) => {
       testcases,
     } = req.body;
 
-    if (!title || !description || !language || !testcases?.length) {
+    if (
+      !title ||
+      !description ||
+      !Array.isArray(testcases) ||
+      testcases.length === 0
+    ) {
       return res.status(400).json({
-        message: "Title, description, language, and test cases are required",
+        message: "Invalid coding question payload",
       });
+    }
+
+    for (const tc of testcases) {
+      if (
+        typeof tc.input !== "string" ||
+        typeof tc.expected_output !== "string"
+      ) {
+        return res.status(400).json({
+          message: "Each test case must have input and expected_output",
+        });
+      }
     }
 
     await client.query("BEGIN");
 
-    /* 1️⃣ Insert base question */
     const qRes = await client.query(
       `
       INSERT INTO exam_questions
@@ -35,12 +47,11 @@ export const addCodingQuestion = async (req, res) => {
       VALUES ($1, $2, $3, $4, 'coding')
       RETURNING question_id
       `,
-      [examId, title, marks ?? 10, order ?? 1],
+      [examId, title, marks ?? 10, order ?? 1]
     );
 
     const questionId = qRes.rows[0].question_id;
 
-    /* 2️⃣ Insert coding question */
     const codingRes = await client.query(
       `
       INSERT INTO exam_coding_questions
@@ -48,12 +59,17 @@ export const addCodingQuestion = async (req, res) => {
       VALUES ($1, $2, $3, $4, $5)
       RETURNING coding_id
       `,
-      [questionId, title, description, language, starter_code || null],
+      [
+        questionId,
+        title,
+        description,
+        language?.toLowerCase() || null,
+        starter_code || null,
+      ]
     );
 
     const codingId = codingRes.rows[0].coding_id;
 
-    /* 3️⃣ Insert test cases */
     for (const tc of testcases) {
       await client.query(
         `
@@ -61,7 +77,7 @@ export const addCodingQuestion = async (req, res) => {
           (coding_id, input, expected_output, is_hidden)
         VALUES ($1, $2, $3, $4)
         `,
-        [codingId, tc.input, tc.expected_output, tc.is_hidden ?? false],
+        [codingId, tc.input, tc.expected_output, tc.is_hidden ?? false]
       );
     }
 

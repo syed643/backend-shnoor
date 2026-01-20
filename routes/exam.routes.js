@@ -26,6 +26,8 @@ import {
   getAllExamsForStudents
 } from "../controllers/exams/exam.controller.js";
 
+import { addDescriptiveQuestion } from "../controllers/exams/examdescriptive.controller.js";
+
 const router = express.Router();
 
 /* ========== INSTRUCTOR: ADD QUESTIONS ========== */
@@ -43,6 +45,14 @@ router.post(
   attachUser,
   roleGuard("instructor"),
   addCodingQuestion
+);
+
+router.post(
+  "/:examId/questions/descriptive",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  addDescriptiveQuestion
 );
 
 /* ========== STUDENT: SUBMIT EXAM ========== */

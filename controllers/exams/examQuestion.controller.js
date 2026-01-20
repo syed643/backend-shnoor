@@ -59,53 +59,58 @@ export const getExamQuestionsForStudent = async (req, res) => {
   }
 };*/}
 
-
-import pool from "../../db/postgres.js";
-
-/**
- * Instructor adds MCQ question
- */
 export const addMcqQuestion = async (req, res) => {
+  const client = await pool.connect();
   try {
     const { examId } = req.params;
     const { questionText, options, correctOption, marks, order } = req.body;
 
-    if (!questionText || !options || !correctOption) {
+    if (
+      !questionText ||
+      !Array.isArray(options) ||
+      options.length < 2 ||
+      !options.includes(correctOption)
+    ) {
       return res.status(400).json({ message: "Invalid MCQ data" });
     }
 
-    /* 1️⃣ Insert question */
-    const questionRes = await pool.query(
+    await client.query("BEGIN");
+
+    const questionRes = await client.query(
       `
       INSERT INTO exam_questions
         (exam_id, question_text, marks, question_order, question_type)
       VALUES ($1, $2, $3, $4, 'mcq')
       RETURNING question_id
       `,
-      [examId, questionText, marks || 1, order || 1]
+      [examId, questionText, marks ?? 1, order ?? 1]
     );
 
     const questionId = questionRes.rows[0].question_id;
 
-    /* 2️⃣ Insert options */
     for (const option of options) {
-      await pool.query(
+      await client.query(
         `
         INSERT INTO exam_mcq_options
           (question_id, option_text, is_correct)
         VALUES ($1, $2, $3)
         `,
-        [questionId, option, option === correctOption]
+        [questionId, option, option.trim() === correctOption.trim()]
       );
     }
+
+    await client.query("COMMIT");
 
     res.status(201).json({
       message: "MCQ question added successfully",
       questionId
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Add MCQ error:", err);
     res.status(500).json({ message: "Failed to add MCQ question" });
+  } finally {
+    client.release();
   }
 };
 

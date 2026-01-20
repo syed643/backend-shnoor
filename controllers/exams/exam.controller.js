@@ -34,7 +34,7 @@
    */
   export const getInstructorExams = async (req, res) => {
     try {
-      const instructorId = req.user.user_id;
+      const instructorId = req.user.id;
 
       const { rows } = await pool.query(
         `
