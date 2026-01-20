@@ -1,5 +1,5 @@
 import pool from "../../db/postgres.js";
-
+console.log("CODING PAYLOAD:", req.body);
 /**
  * Instructor adds CODING question
  */
