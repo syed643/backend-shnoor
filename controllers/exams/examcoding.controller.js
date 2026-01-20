@@ -6,8 +6,8 @@ export const addCodingQuestion = async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const { examId } = req.params;
     console.log("CODING PAYLOAD >>>", JSON.stringify(req.body, null, 2));
+    const { examId } = req.params;
 
     const {
       title,
