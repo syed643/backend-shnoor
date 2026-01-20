@@ -3,20 +3,115 @@ import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
 
+import { addMcqQuestion } from "../controllers/exams/examQuestion.controller.js";
+import { addCodingQuestion } from "../controllers/exams/examcoding.controller.js";
+import { submitExam } from "../controllers/exams/examSubmission.controller.js";
+
+import {
+  getExamSubmissions,
+  evaluateDescriptiveAnswer,
+  evaluateCodingAnswer,
+  finalizeExamResult
+} from "../controllers/exams/examevaluation.controller.js";
+
+import {
+  getMyExamResults,
+  getMyExamResultByExam,
+  getExamResultsForInstructor
+} from "../controllers/exams/examresult.controller.js";
+
 import {
   createExam,
   getInstructorExams,
   getAllExamsForStudents
-} from "../controllers/exam.controller.js";
-
-import {
-  addExamQuestion,
-  getExamQuestionsForStudent
-} from "../controllers/examQuestion.controller.js";
+} from "../controllers/exams/exam.controller.js";
 
 const router = express.Router();
 
-/* Instructor */
+/* ========== INSTRUCTOR: ADD QUESTIONS ========== */
+router.post(
+  "/:examId/questions/mcq",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  addMcqQuestion
+);
+
+router.post(
+  "/:examId/questions/coding",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  addCodingQuestion
+);
+
+/* ========== STUDENT: SUBMIT EXAM ========== */
+router.post(
+  "/:examId/submit",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner"),
+  submitExam
+);
+
+/* ========== INSTRUCTOR: EVALUATION ========== */
+router.get(
+  "/:examId/submissions",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  getExamSubmissions
+);
+
+router.put(
+  "/answers/:answerId/evaluate",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  evaluateDescriptiveAnswer
+);
+
+router.put(
+  "/answers/:answerId/evaluate-coding",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  evaluateCodingAnswer
+);
+
+router.post(
+  "/:examId/students/:studentId/finalize",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  finalizeExamResult
+);
+
+/* ========== RESULTS ========== */
+router.get(
+  "/results/my",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner"),
+  getMyExamResults
+);
+
+router.get(
+  "/results/:examId",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner"),
+  getMyExamResultByExam
+);
+
+router.get(
+  "/:examId/results",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  getExamResultsForInstructor
+);
+
 router.post(
   "/",
   firebaseAuth,
@@ -25,6 +120,7 @@ router.post(
   createExam
 );
 
+// Instructor fetches their exams
 router.get(
   "/instructor",
   firebaseAuth,
@@ -33,15 +129,7 @@ router.get(
   getInstructorExams
 );
 
-router.post(
-  "/:examId/questions",
-  firebaseAuth,
-  attachUser,
-  roleGuard("instructor"),
-  addExamQuestion
-);
-
-/* Students */
+// Students fetch available exams
 router.get(
   "/",
   firebaseAuth,
@@ -49,13 +137,4 @@ router.get(
   roleGuard("student", "learner"),
   getAllExamsForStudents
 );
-
-router.get(
-  "/:examId/questions",
-  firebaseAuth,
-  attachUser,
-  roleGuard("student", "learner"),
-  getExamQuestionsForStudent
-);
-
 export default router;

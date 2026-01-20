@@ -1,7 +1,5 @@
 import admin from "../services/firebaseAdmin.js";
 const firebaseAuth = async (req, res, next) => {
-  console.log("🔥 firebaseAuth middleware HIT");
-
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -16,7 +14,6 @@ const firebaseAuth = async (req, res, next) => {
       email: decodedToken.email,
       name: decodedToken.name || decodedToken.email,
     };
-        console.log("✅ req.firebase set:", req.firebase);
 
     next();
   } catch (error) {

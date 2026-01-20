@@ -5,6 +5,7 @@ import {
   getPendingCourses,
   getApprovedCourses,
   getInstructorCourses,
+  deleteCourse
 } from "../controllers/course.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -57,5 +58,14 @@ router.get(
   roleGuard("admin"),
   getApprovedCourses
 );
+
+router.delete(
+  "/:courseId",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  deleteCourse
+);
+
 
 export default router;

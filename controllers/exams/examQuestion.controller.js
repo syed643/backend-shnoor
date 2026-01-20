@@ -1,8 +1,4 @@
-import pool from "../db/postgres.js";
-
-/**
- * Instructor adds MCQ question
- */
+{/*import pool from "../db/postgres.js";
 export const addExamQuestion = async (req, res) => {
   try {
     const { examId } = req.params;
@@ -36,9 +32,7 @@ export const addExamQuestion = async (req, res) => {
   }
 };
 
-/**
- * Student fetches exam questions (NO answers)
- */
+
 export const getExamQuestionsForStudent = async (req, res) => {
   try {
     const { examId } = req.params;
@@ -63,4 +57,55 @@ export const getExamQuestionsForStudent = async (req, res) => {
     console.error("Fetch questions error:", err);
     res.status(500).json({ message: "Failed to fetch questions" });
   }
+};*/}
+
+
+import pool from "../../db/postgres.js";
+
+/**
+ * Instructor adds MCQ question
+ */
+export const addMcqQuestion = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const { questionText, options, correctOption, marks, order } = req.body;
+
+    if (!questionText || !options || !correctOption) {
+      return res.status(400).json({ message: "Invalid MCQ data" });
+    }
+
+    /* 1️⃣ Insert question */
+    const questionRes = await pool.query(
+      `
+      INSERT INTO exam_questions
+        (exam_id, question_text, marks, question_order, question_type)
+      VALUES ($1, $2, $3, $4, 'mcq')
+      RETURNING question_id
+      `,
+      [examId, questionText, marks || 1, order || 1]
+    );
+
+    const questionId = questionRes.rows[0].question_id;
+
+    /* 2️⃣ Insert options */
+    for (const option of options) {
+      await pool.query(
+        `
+        INSERT INTO exam_mcq_options
+          (question_id, option_text, is_correct)
+        VALUES ($1, $2, $3)
+        `,
+        [questionId, option, option === correctOption]
+      );
+    }
+
+    res.status(201).json({
+      message: "MCQ question added successfully",
+      questionId
+    });
+  } catch (err) {
+    console.error("Add MCQ error:", err);
+    res.status(500).json({ message: "Failed to add MCQ question" });
+  }
 };
+

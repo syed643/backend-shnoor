@@ -142,3 +142,48 @@ export const unassignCourse = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+export const getPublishedCourses = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        courses_id,
+        title,
+        category,
+        difficulty
+        FROM courses
+      WHERE status = 'approved'
+      ORDER BY created_at DESC
+      `
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("getPublishedCourses error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+export const enrollCourse = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const { courseId } = req.body;
+
+    await pool.query(
+      `
+      INSERT INTO course_assignments (course_id, student_id)
+      VALUES ($1, $2)
+      ON CONFLICT DO NOTHING
+      `,
+      [courseId, studentId]
+    );
+
+    res.status(201).json({ message: "Enrolled successfully" });
+  } catch (err) {
+    console.error("enrollCourse error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};

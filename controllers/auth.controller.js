@@ -1,4 +1,3 @@
-console.log("🔥 LOGIN CONTROLLER HIT");
 import admin from "../services/firebaseAdmin.js";
 import pool from "../db/postgres.js";
 

@@ -1,16 +1,17 @@
 import pool from "../db/postgres.js";
 
 export const addCourse = async (req, res) => {
-  const { title, description, category, thumbnail_url } = req.body;
+  const { title, description, category, thumbnail_url, difficulty, status } = req.body;
   const instructor_id = req.user.id;
+  console.log("STATUS RECEIVED:", status); // 🔥 DEBUG LINE
 
   try {
     const result = await pool.query(
       `INSERT INTO courses
-       (instructor_id, title, description, category, thumbnail_url, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')
+       (instructor_id, title, description, category, thumbnail_url, difficulty, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [instructor_id, title, description, category, thumbnail_url]
+      [instructor_id, title, description, category, thumbnail_url || null, difficulty || null, status === "pending" ? "pending" : "draft"]
     );
 
     res.status(201).json({
@@ -23,6 +24,7 @@ export const addCourse = async (req, res) => {
   }
 };
 
+
 export const getInstructorCourses = async (req, res) => {
   try {
 const result = await pool.query(
@@ -33,6 +35,7 @@ const result = await pool.query(
     c.description,
     c.category,
     c.status,
+    c.difficulty,
     c.created_at,
     COALESCE(
       json_agg(
@@ -132,4 +135,55 @@ export const getApprovedCourses = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+export const deleteCourse = async (req, res) => {
+  const { courseId } = req.params;
+
+  if (!courseId) {
+    return res.status(400).json({ message: "courseId is required" });
+  }
+
+  try {
+    /* 🔐 CHECK OWNERSHIP */
+    const courseCheck = await pool.query(
+      `
+      SELECT courses_id
+      FROM courses
+      WHERE courses_id = $1 AND instructor_id = $2
+      `,
+      [courseId, req.user.id]
+    );
+
+    if (courseCheck.rows.length === 0) {
+      return res.status(403).json({
+        message: "You are not allowed to delete this course",
+      });
+    }
+
+    /* 🧹 DELETE DEPENDENT DATA */
+    await pool.query(
+      `DELETE FROM modules WHERE course_id = $1`,
+      [courseId]
+    );
+
+    await pool.query(
+      `DELETE FROM course_assignments WHERE course_id = $1`,
+      [courseId]
+    );
+
+    /* 🗑 DELETE COURSE */
+    await pool.query(
+      `DELETE FROM courses WHERE courses_id = $1`,
+      [courseId]
+    );
+
+    res.status(200).json({
+      message: "Course deleted successfully",
+    });
+  } catch (error) {
+    console.error("deleteCourse error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 

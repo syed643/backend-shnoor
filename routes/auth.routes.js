@@ -3,7 +3,7 @@ import {
   register,
   login,
   logout,
-} from "../controllers/auth.Controller.js";
+} from "../controllers/auth.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
