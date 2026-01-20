@@ -1,9 +1,9 @@
 import pool from "../../db/postgres.js";
-console.log("CODING PAYLOAD:", req.body);
 /**
  * Instructor adds CODING question
  */
 export const addCodingQuestion = async (req, res) => {
+  console.log("CODING PAYLOAD:", req.body);
   const client = await pool.connect();
 
   try {
