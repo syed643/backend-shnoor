@@ -59,6 +59,7 @@ export const getExamQuestionsForStudent = async (req, res) => {
   }
 };*/}
 
+import pool from "../../db/postgres.js";
 export const addMcqQuestion = async (req, res) => {
   const client = await pool.connect();
   try {
