@@ -8,11 +8,19 @@ export const addCodingQuestion = async (req, res) => {
 
   try {
     const { examId } = req.params;
-    const { title, description, marks, order, testcases } = req.body;
+    const {
+      title,
+      description,
+      marks,
+      order,
+      language,
+      starter_code,
+      testcases,
+    } = req.body;
 
-    if (!title || !description || !testcases || testcases.length === 0) {
+    if (!title || !description || !language || !testcases?.length) {
       return res.status(400).json({
-        message: "Coding question requires title, description, and test cases",
+        message: "Title, description, language, and test cases are required",
       });
     }
 
@@ -28,23 +36,29 @@ export const addCodingQuestion = async (req, res) => {
       `,
       [
         examId,
-        title,          // short title stored here
-        marks || 10,
-        order || 1
+        title,
+        marks ?? 10,
+        order ?? 1,
       ]
     );
 
     const questionId = qRes.rows[0].question_id;
 
-    /* 2️⃣ Insert coding metadata */
+    /* 2️⃣ Insert coding question */
     const codingRes = await client.query(
       `
       INSERT INTO exam_coding_questions
-        (question_id, title, description)
-      VALUES ($1, $2, $3)
+        (question_id, title, description, language, starter_code)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING coding_id
       `,
-      [questionId, title, description]
+      [
+        questionId,
+        title,
+        description,
+        language,
+        starter_code || null,
+      ]
     );
 
     const codingId = codingRes.rows[0].coding_id;
@@ -53,7 +67,7 @@ export const addCodingQuestion = async (req, res) => {
     for (const tc of testcases) {
       await client.query(
         `
-        INSERT INTO exam_coding_testcases
+        INSERT INTO exam_test_cases
           (coding_id, input, expected_output, is_hidden)
         VALUES ($1, $2, $3, $4)
         `,
@@ -61,7 +75,7 @@ export const addCodingQuestion = async (req, res) => {
           codingId,
           tc.input,
           tc.expected_output,
-          tc.is_hidden || false
+          tc.is_hidden ?? false,
         ]
       );
     }
@@ -76,7 +90,7 @@ export const addCodingQuestion = async (req, res) => {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Add coding question error:", err);
-    res.status(500).json({ message: "Failed to add coding question" });
+    res.status(500).json({ message: err.message });
   } finally {
     client.release();
   }
