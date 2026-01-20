@@ -1,5 +1,3 @@
-console.log("CODING PAYLOAD:", req.body);
-
 import pool from "../../db/postgres.js";
 /**
  * Instructor adds CODING question
@@ -9,6 +7,8 @@ export const addCodingQuestion = async (req, res) => {
 
   try {
     const { examId } = req.params;
+    console.log("CODING PAYLOAD:", req.body);
+
     const {
       title,
       description,
@@ -35,12 +35,7 @@ export const addCodingQuestion = async (req, res) => {
       VALUES ($1, $2, $3, $4, 'coding')
       RETURNING question_id
       `,
-      [
-        examId,
-        title,
-        marks ?? 10,
-        order ?? 1,
-      ]
+      [examId, title, marks ?? 10, order ?? 1],
     );
 
     const questionId = qRes.rows[0].question_id;
@@ -53,13 +48,7 @@ export const addCodingQuestion = async (req, res) => {
       VALUES ($1, $2, $3, $4, $5)
       RETURNING coding_id
       `,
-      [
-        questionId,
-        title,
-        description,
-        language,
-        starter_code || null,
-      ]
+      [questionId, title, description, language, starter_code || null],
     );
 
     const codingId = codingRes.rows[0].coding_id;
@@ -72,12 +61,7 @@ export const addCodingQuestion = async (req, res) => {
           (coding_id, input, expected_output, is_hidden)
         VALUES ($1, $2, $3, $4)
         `,
-        [
-          codingId,
-          tc.input,
-          tc.expected_output,
-          tc.is_hidden ?? false,
-        ]
+        [codingId, tc.input, tc.expected_output, tc.is_hidden ?? false],
       );
     }
 
