@@ -7,7 +7,7 @@ export const addCodingQuestion = async (req, res) => {
 
   try {
     const { examId } = req.params;
-    console.log("CODING PAYLOAD:", req.body);
+    console.log("CODING PAYLOAD >>>", JSON.stringify(req.body, null, 2));
 
     const {
       title,
