@@ -3,6 +3,7 @@ import {
   register,
   login,
   logout,
+  getMe
 } from "../controllers/auth.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -27,5 +28,13 @@ router.post(
   attachUser,
   logout
 );
+
+router.get(
+  "/me",
+  firebaseAuth,
+  attachUser,
+  getMe
+);
+
 
 export default router;

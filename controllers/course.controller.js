@@ -229,3 +229,36 @@ export const getInstructorCourseStats = async (req, res) => {
   }
 };
 
+export const getCourseById = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        c.courses_id,
+        c.title,
+        c.description,
+        c.level,
+        c.thumbnail_url,
+        c.created_at,
+        u.full_name AS instructor_name
+      FROM courses c
+      JOIN users u ON c.instructor_id = u.user_id
+      WHERE c.courses_id = $1
+      `,
+      [courseId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("getCourseById error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+

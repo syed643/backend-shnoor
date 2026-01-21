@@ -118,3 +118,18 @@ export const logout = async (req, res) => {
     message: "Logout successful",
   });
 };
+
+export const getMe = async (req, res) => {
+  try {
+    // attachUser already ran
+    res.json({
+      user_id: req.user.user_id,
+      full_name: req.user.full_name,
+      email: req.user.email,
+      role: req.user.role,
+      status: req.user.status,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch user" });
+  }
+};

@@ -1,4 +1,4 @@
-const roleGuard = (...allowedRoles) => {
+{/*const roleGuard = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
@@ -14,6 +14,30 @@ const roleGuard = (...allowedRoles) => {
       });
     }
 
+    if (!allowedRoles.includes(role)) {
+      return res.status(403).json({
+        message: "Access denied",
+      });
+    }
+
+    next();
+  };
+};
+
+export default roleGuard;*/}
+
+
+const roleGuard = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Unauthorized (user not loaded)",
+      });
+    }
+
+    const { role } = req.user;
+
+    // 🔐 Role-based access only
     if (!allowedRoles.includes(role)) {
       return res.status(403).json({
         message: "Access denied",

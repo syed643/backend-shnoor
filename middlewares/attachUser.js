@@ -4,8 +4,11 @@ const attachUser = async (req, res, next) => {
     if (!req.firebase || !req.firebase.uid) {
       return res.status(401).json({
         message: "Unauthorized (Firebase identity missing)",
-      });}
+      });
+    }
+
     const firebaseUid = req.firebase.uid;
+
     const result = await pool.query(
       `SELECT
          user_id,
@@ -15,14 +18,21 @@ const attachUser = async (req, res, next) => {
          status
        FROM users
        WHERE firebase_uid = $1`,
-      [firebaseUid]
+      [firebaseUid],
     );
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         message: "User not found in system",
       });
     }
+
     const user = result.rows[0];
+    if (user.status !== "active") {
+      return res.status(403).json({
+        message: "Your account is suspended or inactive. Contact admin.",
+      });
+    }
     req.user = {
       id: user.user_id,
       fullName: user.full_name,

@@ -7,8 +7,10 @@ import {
   getCoursesByStatus,
   approveUser,
   getPendingUsers,
-  getPendingCourses
+  getPendingCourses,
+  updateUserStatus
 } from "../controllers/admin.controller.js";
+import { getAllUsers } from "../controllers/user.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
@@ -31,8 +33,6 @@ router.get(
   getAllStudents
 );
 
-
-
 router.post(
   "/assign-courses",
   firebaseAuth,
@@ -40,6 +40,7 @@ router.post(
   roleGuard("admin"),
   assignCourses
 );
+
 router.get(
   "/courses",
   firebaseAuth,
@@ -47,6 +48,7 @@ router.get(
   roleGuard("admin"),
   getCoursesByStatus
 );
+
 router.get(
   "/courses/pending",
   firebaseAuth,
@@ -79,6 +81,21 @@ router.get(
   getPendingUsers
 );
 
+router.put(
+  "/users/:userId/status",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  updateUserStatus
+);
+
+router.get(
+  "/users",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  getAllUsers
+);
 
 export default router;
 

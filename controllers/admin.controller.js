@@ -2,13 +2,13 @@ import pool from "../db/postgres.js";
 export const getDashboardStats = async (req, res) => {
   try {
     const studentsResult = await pool.query(
-      "SELECT COUNT(*) FROM users WHERE role = 'student'"
+      "SELECT COUNT(*) FROM users WHERE role = 'student'",
     );
     const instructorsResult = await pool.query(
-      "SELECT COUNT(*) FROM users WHERE role = 'instructor'"
+      "SELECT COUNT(*) FROM users WHERE role = 'instructor'",
     );
     const pendingCoursesResult = await pool.query(
-      "SELECT COUNT(*) FROM courses WHERE status = 'pending'"
+      "SELECT COUNT(*) FROM courses WHERE status = 'pending'",
     );
     res.status(200).json({
       totalStudents: Number(studentsResult.rows[0].count),
@@ -28,7 +28,7 @@ export const getAllStudents = async (req, res) => {
 FROM users
 WHERE role IN ('student', 'user')
 ORDER BY created_at DESC;
-`
+`,
     );
     res.status(200).json(result.rows);
   } catch (error) {
@@ -92,7 +92,7 @@ export const updateCourseStatus = async (req, res) => {
     // ✅ Check if course exists
     const courseCheck = await pool.query(
       `SELECT courses_id FROM courses WHERE courses_id = $1`,
-      [courses_id]
+      [courses_id],
     );
 
     if (courseCheck.rows.length === 0) {
@@ -107,7 +107,7 @@ export const updateCourseStatus = async (req, res) => {
        SET status = $1
        WHERE courses_id = $2
        RETURNING courses_id, title, status`,
-      [status, courses_id]
+      [status, courses_id],
     );
 
     res.status(200).json({
@@ -149,7 +149,7 @@ export const getCoursesByStatus = async (req, res) => {
       WHERE c.status = $1
       ORDER BY c.created_at DESC
       `,
-      [status]
+      [status],
     );
 
     res.status(200).json({
@@ -175,7 +175,7 @@ export const getPendingCourses = async (req, res) => {
 FROM courses c
 JOIN users u ON c.instructor_id = u.user_id
 WHERE c.status = 'pending'
-ORDER BY c.created_at DESC`
+ORDER BY c.created_at DESC`,
     );
 
     res.status(200).json({
@@ -195,7 +195,7 @@ export const approveUser = async (req, res) => {
 
     const result = await pool.query(
       `SELECT role, status FROM users WHERE user_id = $1`,
-      [userId]
+      [userId],
     );
 
     if (result.rows.length === 0) {
@@ -229,7 +229,7 @@ export const approveUser = async (req, res) => {
        SET status = 'active'
        WHERE user_id = $1
        RETURNING user_id, role, status`,
-      [userId]
+      [userId],
     );
 
     res.json({
@@ -256,7 +256,7 @@ export const getPendingUsers = async (req, res) => {
          created_at
        FROM users
        WHERE status = 'pending'
-       ORDER BY created_at DESC`
+       ORDER BY created_at DESC`,
     );
 
     res.json({
@@ -267,5 +267,36 @@ export const getPendingUsers = async (req, res) => {
     res.status(500).json({
       message: "Failed to fetch pending users",
     });
+  }
+};
+
+export const updateUserStatus = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { status } = req.body; // 'active' | 'blocked'
+
+    if (!["active", "blocked"].includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    await pool.query(
+      `
+      UPDATE users
+      SET status = $1
+      WHERE user_id = $2
+      `,
+      [status, userId],
+    );
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    res.json({ message: `User ${status} successfully` });
+  } catch (err) {
+    console.error("updateUserStatus error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
