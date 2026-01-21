@@ -189,7 +189,7 @@ export const deleteCourse = async (req, res) => {
 
 export const getApprovedCoursesForInstructor = async (req, res) => {
   try {
-    const instructorId = req.user.user_id;
+    const instructorId = req.user.id;
 
     const result = await pool.query(
       `
