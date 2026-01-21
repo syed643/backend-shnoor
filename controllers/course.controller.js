@@ -187,3 +187,24 @@ export const deleteCourse = async (req, res) => {
 };
 
 
+export const getApprovedCoursesForInstructor = async (req, res) => {
+  try {
+    const instructorId = req.user.user_id;
+
+    const result = await pool.query(
+      `
+      SELECT c.courses_id, c.title
+      FROM courses c
+      WHERE c.status = 'approved'
+        AND c.instructor_id = $1
+      ORDER BY c.created_at DESC
+      `,
+      [instructorId]
+    );
+
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error("getApprovedCoursesForInstructor error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
