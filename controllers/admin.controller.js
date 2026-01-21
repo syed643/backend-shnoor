@@ -279,7 +279,7 @@ export const updateUserStatus = async (req, res) => {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    await pool.query(
+    const result = await pool.query(
       `
       UPDATE users
       SET status = $1
