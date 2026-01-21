@@ -67,3 +67,24 @@ export const getStudentCourseById = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+export const getInstructorStudentCount = async (req, res) => {
+  try {
+    const instructorId = req.user.id;
+
+    const { rows } = await pool.query(
+      `
+      SELECT COUNT(DISTINCT sc.student_id) AS total_students
+      FROM student_courses sc
+      JOIN courses c ON sc.course_id = c.courses_id
+      WHERE c.instructor_id = $1
+      `,
+      [instructorId]
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("Instructor student count error:", err);
+    res.status(500).json({ message: "Failed to fetch students count" });
+  }
+};

@@ -4,7 +4,8 @@ import {
   unassignCourse,
   getMyCourses,
   getPublishedCourses,
-  enrollCourse
+  enrollCourse,
+  getInstructorStudentCount
 } from "../controllers/assignmentController.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -55,6 +56,15 @@ router.post(
   roleGuard("student"),
   enrollCourse
 );
+
+router.get(
+  "/instructor/students/count",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  getInstructorStudentCount
+);
+
 
 
 export default router;

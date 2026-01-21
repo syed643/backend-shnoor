@@ -186,7 +186,6 @@ export const deleteCourse = async (req, res) => {
   }
 };
 
-
 export const getApprovedCoursesForInstructor = async (req, res) => {
   try {
     const instructorId = req.user.id;
@@ -208,3 +207,25 @@ export const getApprovedCoursesForInstructor = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+export const getInstructorCourseStats = async (req, res) => {
+  try {
+    const instructorId = req.user.id;
+
+    const { rows } = await pool.query(
+      `
+      SELECT 
+        COUNT(*) AS total_courses
+      FROM courses
+      WHERE instructor_id = $1
+      `,
+      [instructorId]
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("Instructor course stats error:", err);
+    res.status(500).json({ message: "Failed to fetch course stats" });
+  }
+};
+
