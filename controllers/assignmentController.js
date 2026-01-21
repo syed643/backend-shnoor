@@ -209,3 +209,28 @@ export const getInstructorStudentCount = async (req, res) => {
   }
 };
 
+export const getInstructorEnrolledStudents = async (req, res) => {
+  try {
+    const instructorId = req.user.user_id;
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        u.user_id AS student_id,
+        u.full_name AS student_name,
+        c.title AS course_title
+      FROM course_assignments ca
+      JOIN users u ON ca.student_id = u.user_id
+      JOIN courses c ON ca.course_id = c.courses_id
+      WHERE c.instructor_id = $1
+      ORDER BY u.full_name ASC
+      `,
+      [instructorId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Fetch instructor students error:", err);
+    res.status(500).json({ message: "Failed to fetch enrolled students" });
+  }
+};

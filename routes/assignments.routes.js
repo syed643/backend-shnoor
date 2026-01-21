@@ -5,7 +5,8 @@ import {
   getMyCourses,
   getPublishedCourses,
   enrollCourse,
-  getInstructorStudentCount
+  getInstructorStudentCount,
+  getInstructorEnrolledStudents,
 } from "../controllers/assignmentController.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -65,6 +66,13 @@ router.get(
   getInstructorStudentCount
 );
 
+router.get(
+  "/instructor/students",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  getInstructorEnrolledStudents
+);
 
 
 export default router;
