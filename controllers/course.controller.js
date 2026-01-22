@@ -275,7 +275,7 @@ export const exploreCourses = async (req, res) => {
         u.full_name AS instructorName
       FROM courses c
       LEFT JOIN users u ON u.user_id = c.instructor_id
-      WHERE c.course_id NOT IN (
+      WHERE c.courses_id NOT IN (
         SELECT course_id
         FROM student_courses
         WHERE student_id = $1
