@@ -10,6 +10,7 @@ import assignmentsRoutes from "./routes/assignments.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import studentCoursesRoutes from "./routes/studentCourses.routes.js";
 import examRoutes from "./routes/exam.routes.js";
+import studentExamRoutes from "./routes/studentExam.routes.js";
 
 
 
@@ -45,6 +46,7 @@ app.use("/api/assignments", assignmentsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/student", studentCoursesRoutes)
 app.use("/api/exams", examRoutes);
+app.use("/api/exam", studentExamRoutes);
 
 
 
