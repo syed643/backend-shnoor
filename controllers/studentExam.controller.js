@@ -1,3 +1,5 @@
+import pool from "../db/postgres.js";
+
 export const getStudentExams = async (req, res) => {
   const studentId = req.user.id;
 
