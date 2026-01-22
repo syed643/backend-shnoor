@@ -88,3 +88,46 @@ export const getInstructorStudentCount = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch students count" });
   }
 };
+
+export const enrollStudent = async (req, res) => {
+  const studentId = req.user.id;
+  const { courseId } = req.params;
+
+  await pool.query(
+    `INSERT INTO student_courses (student_id, course_id)
+     VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [studentId, courseId]
+  );
+
+  res.json({ success: true });
+};
+
+export const checkEnrollmentStatus = async (req, res) => {
+  const studentId = req.user.id;
+  const { courseId } = req.params;
+
+  const { rowCount } = await pool.query(
+    `SELECT 1 FROM student_courses
+     WHERE student_id = $1 AND course_id = $2`,
+    [studentId, courseId]
+  );
+
+  res.json({ enrolled: rowCount > 0 });
+};
+
+export const getMyCourses = async (req, res) => {
+  const studentId = req.user.id;
+
+  const { rows } = await pool.query(
+    `
+    SELECT c.*
+    FROM student_courses sc
+    JOIN courses c ON c.courses_id = sc.course_id
+    WHERE sc.student_id = $1
+    `,
+    [studentId]
+  );
+
+  res.json(rows);
+};
