@@ -9,7 +9,7 @@ export const getStudentExams = async (req, res) => {
       e.exam_id,
       e.title,
       e.duration,
-      e.pass_score,
+      e.pass_percentage,
       c.title AS course_title,
       er.exam_id IS NOT NULL AS attempted
     FROM exams e
