@@ -238,25 +238,32 @@ export const getCourseById = async (req, res) => {
         c.courses_id,
         c.title,
         c.description,
-        c.difficulty AS level,
-        c.thumbnail_url,
+        c.category,
+        c.difficulty AS level,        -- 👈 FIX LEVEL
         c.created_at,
-        u.full_name AS instructor_name
+
+        json_build_object(            -- 👈 FIX INSTRUCTOR
+          'name', u.full_name,
+          'email', u.email
+        ) AS instructor
+
       FROM courses c
-      JOIN users u ON c.instructor_id = u.user_id
+      LEFT JOIN users u
+        ON u.user_id = c.instructor_id
+
       WHERE c.courses_id = $1
       `,
       [courseId]
     );
 
-    if (!rows.length) {
+    if (rows.length === 0) {
       return res.status(404).json({ message: "Course not found" });
     }
 
     res.json(rows[0]);
   } catch (err) {
     console.error("getCourseById error:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Failed to fetch course" });
   }
 };
 
