@@ -238,7 +238,7 @@ export const getCourseById = async (req, res) => {
         c.courses_id,
         c.title,
         c.description,
-        c.difficulty,
+        c.difficulty AS level,
         c.thumbnail_url,
         c.created_at,
         u.full_name AS instructor_name
