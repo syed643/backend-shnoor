@@ -24,7 +24,6 @@ export const addCourse = async (req, res) => {
   }
 };
 
-
 export const getInstructorCourses = async (req, res) => {
   try {
 const result = await pool.query(
@@ -258,6 +257,38 @@ export const getCourseById = async (req, res) => {
   } catch (err) {
     console.error("getCourseById error:", err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const exploreCourses = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        c.courses_id,
+        c.title,
+        c.description,
+        c.category,
+        c.difficulty AS level,
+        u.full_name AS instructorName
+      FROM courses c
+      LEFT JOIN users u ON u.user_id = c.instructor_id
+      WHERE c.course_id NOT IN (
+        SELECT course_id
+        FROM student_courses
+        WHERE student_id = $1
+      )
+      ORDER BY c.created_at DESC
+      `,
+      [studentId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Explore courses error:", err);
+    res.status(500).json({ message: "Failed to load explore courses" });
   }
 };
 

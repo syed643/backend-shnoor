@@ -8,7 +8,8 @@ import {
   deleteCourse,
   getApprovedCoursesForInstructor,
   getInstructorCourseStats,
-  getCourseById
+  getCourseById,
+  exploreCourses
 } from "../controllers/course.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -84,6 +85,13 @@ router.get(
   attachUser,
   roleGuard("instructor"),
   getInstructorCourseStats
+);
+
+router.get(
+  "/explore",
+  firebaseAuth,
+  attachUser,
+  exploreCourses
 );
 
 router.get(
