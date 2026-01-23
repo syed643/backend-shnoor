@@ -70,9 +70,6 @@ export const addModules = async (req, res) => {
   }
 };
 
-
-
-
 export const getModulesByCourse = async (req, res) => {
   const { courseId } = req.params;
 
