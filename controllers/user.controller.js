@@ -97,3 +97,38 @@ export const updateUserStatus = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+export const updateMyProfile = async (req, res) => {
+  const { displayName, bio, headline, linkedin, github, photoURL } = req.body;
+
+  try {
+    await pool.query(
+      `
+      UPDATE users SET
+        full_name = $1,
+        bio = $2,
+        headline = $3,
+        linkedin = $4,
+        github = $5,
+        photo_url = $6,
+        updated_at = NOW()
+      WHERE user_id = $7
+      `,
+      [
+        displayName,
+        bio,
+        headline,
+        linkedin,
+        github,
+        photoURL,
+        req.user.id
+      ]
+    );
+
+    res.status(200).json({ message: "Profile updated successfully" });
+  } catch (error) {
+    console.error("updateMyProfile error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
