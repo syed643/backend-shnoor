@@ -46,7 +46,7 @@ app.use("/api/assignments", assignmentsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/student", studentCoursesRoutes)
 app.use("/api/exams", examRoutes);
-app.use("/api/exam", studentExamRoutes);
+app.use("/api/student/exams", studentExamRoutes);
 
 
 
