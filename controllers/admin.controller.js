@@ -1,4 +1,5 @@
 import pool from "../db/postgres.js";
+
 export const getDashboardStats = async (req, res) => {
   try {
     const studentsResult = await pool.query(
