@@ -91,7 +91,7 @@ export const addInstructor = async (req, res) => {
 
     // 🔵 6️⃣ SEND EMAIL (DO NOT BREAK API IF IT FAILS)
     try {
-      await sendInstructorEmail(email, fullName);
+      await sendInstructorInvite(email, fullName);
     } catch (mailError) {
       console.error("SMTP failed:", mailError);
     }
