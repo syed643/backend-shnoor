@@ -4,6 +4,7 @@ import {
   getAllUsers,
   addInstructor,
   updateUserStatus,
+  updateMyProfile,
 } from "../controllers/user.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -20,7 +21,6 @@ router.get(
   getMyProfile
 );
 
-
 router.get(
   "/",
   firebaseAuth,
@@ -28,7 +28,6 @@ router.get(
   roleGuard("admin"),
   getAllUsers
 );
-
 
 router.post(
   "/instructors",
@@ -38,13 +37,19 @@ router.post(
   addInstructor
 );
 
-
 router.patch(
   "/:userId/status",
   firebaseAuth,
   attachUser,
   roleGuard("admin"),
   updateUserStatus
+);
+
+router.put(
+  "/me",
+  firebaseAuth,
+  attachUser,
+  updateMyProfile
 );
 
 export default router;

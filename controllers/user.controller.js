@@ -1,19 +1,25 @@
 import admin from "../services/firebaseAdmin.js";
 import pool from "../db/postgres.js";
 
-
 export const getMyProfile = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT 
-         user_id AS id,
-         full_name AS name,
-         email,
-         role,
-         status,
-         created_at
-       FROM users
-       WHERE user_id = $1`,
+      `
+      SELECT
+        user_id AS id,
+        full_name AS "displayName",
+        email,
+        role,
+        status,
+        bio,
+        headline,
+        linkedin,
+        github,
+        photo_url AS "photoURL",
+        created_at
+      FROM users
+      WHERE user_id = $1
+      `,
       [req.user.id]
     );
 
