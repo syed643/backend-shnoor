@@ -11,7 +11,7 @@ export const sendInstructorInvite = async ({ email, name }) => {
       <p>You have been added as an Instructor.</p>
       <p>Please login using your email.</p>
       <br />
-      <a href="https://your-frontend-url.com/login">
+      <a href="https://lms.shnoor.com/login">
         Login to Dashboard
       </a>
     `,
