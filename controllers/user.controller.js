@@ -50,11 +50,24 @@ export const addInstructor = async (req, res) => {
   const { fullName, email, subject, phone, bio } = req.body;
 
   try {
+    // 1️⃣ Check duplicate email
+    const existing = await pool.query("SELECT 1 FROM users WHERE email = $1", [
+      email,
+    ]);
+
+    if (existing.rows.length > 0) {
+      return res.status(409).json({
+        message: "An account with this email already exists",
+      });
+    }
+
+    // 2️⃣ Create Firebase user
     const firebaseUser = await admin.auth().createUser({
       email,
       displayName: fullName,
     });
 
+    // 3️⃣ Insert user
     const userResult = await pool.query(
       `INSERT INTO users (firebase_uid, full_name, email, role, status)
        VALUES ($1, $2, $3, 'instructor', 'active')
@@ -64,23 +77,27 @@ export const addInstructor = async (req, res) => {
 
     const instructorId = userResult.rows[0].user_id;
 
+    // 4️⃣ Insert instructor profile
     await pool.query(
       `INSERT INTO instructor_profiles (instructor_id, subject, phone, bio)
        VALUES ($1, $2, $3, $4)`,
-      [instructorId, subject, phone, bio],
+      [instructorId, subject, phone || null, bio || null],
     );
 
-    await sendInstructorInvite({
-      email,
-      name: fullName,
-    });
-
+    // ✅ 5️⃣ SEND SUCCESS RESPONSE FIRST
     res.status(201).json({
       message: "Instructor created successfully",
     });
+
+    // 🔵 6️⃣ SEND EMAIL (DO NOT BREAK API IF IT FAILS)
+    try {
+      await sendInstructorEmail(email, fullName);
+    } catch (mailError) {
+      console.error("SMTP failed:", mailError);
+    }
   } catch (error) {
     console.error("addInstructor error:", error);
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: "Failed to create instructor" });
   }
 };
 
