@@ -47,7 +47,7 @@ export const addCodingQuestion = async (req, res) => {
       VALUES ($1, $2, $3, $4, 'coding')
       RETURNING question_id
       `,
-      [examId, title, marks ?? 10, order ?? 1]
+      [examId, title, marks ?? 10, order ?? 1],
     );
 
     const questionId = qRes.rows[0].question_id;
@@ -65,19 +65,18 @@ export const addCodingQuestion = async (req, res) => {
         description,
         language?.toLowerCase() || null,
         starter_code || null,
-      ]
+      ],
     );
 
     const codingId = codingRes.rows[0].coding_id;
-
     for (const tc of testcases) {
       await client.query(
         `
-        INSERT INTO exam_test_cases
-          (coding_id, input, expected_output, is_hidden)
-        VALUES ($1, $2, $3, $4)
-        `,
-        [codingId, tc.input, tc.expected_output, tc.is_hidden ?? false]
+    INSERT INTO exam_test_cases
+      (coding_id, input, expected_output, is_hidden)
+    VALUES ($1, $2, $3, $4)
+    `,
+        [codingId, tc.input, tc.expected_output, tc.is_hidden === true],
       );
     }
 
