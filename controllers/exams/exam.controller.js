@@ -5,21 +5,37 @@
    */
   export const createExam = async (req, res) => {
     try {
-      const { title, description, duration, passPercentage } = req.body;
+      const { title, description, duration, passPercentage, courseId, validity_value, validity_unit } = req.body;
       const instructorId = req.user.id;
 
       if (!title || !duration || !passPercentage) {
         return res.status(400).json({ message: "Missing required fields" });
       }
+          // 🔥 RULE ENFORCEMENT
+    if (!courseId) {
+      // Standalone exam
+      if (!validity_value || !validity_unit) {
+        return res.status(400).json({
+          message: "Standalone exams must have validity",
+        });
+      }
+    } else {
+      // Course-linked exam → force NULL
+      if (validity_value || validity_unit) {
+        return res.status(400).json({
+          message: "Course-linked exams must not have validity",
+        });
+      }
+    }
 
       const { rows } = await pool.query(
         `
         INSERT INTO exams
-          (title, description, duration, pass_percentage, instructor_id)
-        VALUES ($1, $2, $3, $4, $5)
+          (title, description, duration, pass_percentage, instructor_id, course_id, validity_value, validity_unit)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING exam_id, title, duration, pass_percentage
         `,
-        [title, description, duration, passPercentage, instructorId]
+        [title, description, duration, passPercentage, instructorId, courseId || null, validity_value || null, validity_unit || null]
       );
 
       res.status(201).json(rows[0]);
