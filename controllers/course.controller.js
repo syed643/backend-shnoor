@@ -1,21 +1,70 @@
 import pool from "../db/postgres.js";
 
 export const addCourse = async (req, res) => {
-  const { title, description, category, thumbnail_url, difficulty, status } = req.body;
+  const {
+    title,
+    description,
+    category,
+    thumbnail_url,
+    difficulty,
+    status,
+    validity_value,
+    validity_unit,
+  } = req.body;
+
   const instructor_id = req.user.id;
-  console.log("STATUS RECEIVED:", status); // 🔥 DEBUG LINE
 
   try {
-    const result = await pool.query(
-      `INSERT INTO courses
-       (instructor_id, title, description, category, thumbnail_url, difficulty, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [instructor_id, title, description, category, thumbnail_url || null, difficulty || null, status === "pending" ? "pending" : "draft"]
-    );
+    let expiresAt = null;
+
+    if (validity_value && validity_unit) {
+      if (validity_unit === "days") {
+        expiresAt = `NOW() + INTERVAL '${validity_value} days'`;
+      } else if (validity_unit === "months") {
+        expiresAt = `NOW() + INTERVAL '${validity_value} months'`;
+      } else if (validity_unit === "years") {
+        expiresAt = `NOW() + INTERVAL '${validity_value} years'`;
+      }
+    }
+
+    const query = `
+      INSERT INTO courses
+      (
+        instructor_id,
+        title,
+        description,
+        category,
+        thumbnail_url,
+        difficulty,
+        status,
+        validity_value,
+        validity_unit,
+        expires_at
+      )
+      VALUES
+      (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9,
+        ${expiresAt ? expiresAt : "NULL"}
+      )
+      RETURNING *
+    `;
+
+    const values = [
+      instructor_id,
+      title,
+      description,
+      category,
+      thumbnail_url || null,
+      difficulty || null,
+      status === "pending" ? "pending" : "draft",
+      validity_value || null,
+      validity_unit || null,
+    ];
+
+    const result = await pool.query(query, values);
 
     res.status(201).json({
-      message: "Course created and sent for admin approval",
+      message: "Course created with validity",
       course: result.rows[0],
     });
   } catch (error) {
@@ -26,8 +75,8 @@ export const addCourse = async (req, res) => {
 
 export const getInstructorCourses = async (req, res) => {
   try {
-const result = await pool.query(
-  `
+    const result = await pool.query(
+      `
   SELECT
     c.courses_id,
     c.title,
@@ -56,8 +105,8 @@ const result = await pool.query(
   GROUP BY c.courses_id
   ORDER BY c.created_at DESC
   `,
-  [req.user.id]
-);
+      [req.user.id],
+    );
 
     res.status(200).json(result.rows);
   } catch (error) {
@@ -73,7 +122,7 @@ export const getPendingCourses = async (req, res) => {
        FROM courses c
        JOIN users u ON c.instructor_id = u.user_id
        WHERE c.status = 'pending'
-       ORDER BY c.created_at DESC`
+       ORDER BY c.created_at DESC`,
     );
 
     res.status(200).json(result.rows);
@@ -99,7 +148,7 @@ export const approveCourse = async (req, res) => {
        SET status = $1
        WHERE course_id = $2
        RETURNING *`,
-      [status, courseId]
+      [status, courseId],
     );
 
     if (result.rows.length === 0) {
@@ -125,7 +174,7 @@ export const getApprovedCourses = async (req, res) => {
        FROM courses c
        JOIN users u ON c.instructor_id = u.user_id
        WHERE c.status = 'approved'
-       ORDER BY c.created_at DESC`
+       ORDER BY c.created_at DESC`,
     );
 
     res.status(200).json(result.rows);
@@ -150,7 +199,7 @@ export const deleteCourse = async (req, res) => {
       FROM courses
       WHERE courses_id = $1 AND instructor_id = $2
       `,
-      [courseId, req.user.id]
+      [courseId, req.user.id],
     );
 
     if (courseCheck.rows.length === 0) {
@@ -160,21 +209,14 @@ export const deleteCourse = async (req, res) => {
     }
 
     /* 🧹 DELETE DEPENDENT DATA */
-    await pool.query(
-      `DELETE FROM modules WHERE course_id = $1`,
-      [courseId]
-    );
+    await pool.query(`DELETE FROM modules WHERE course_id = $1`, [courseId]);
 
-    await pool.query(
-      `DELETE FROM course_assignments WHERE course_id = $1`,
-      [courseId]
-    );
+    await pool.query(`DELETE FROM course_assignments WHERE course_id = $1`, [
+      courseId,
+    ]);
 
     /* 🗑 DELETE COURSE */
-    await pool.query(
-      `DELETE FROM courses WHERE courses_id = $1`,
-      [courseId]
-    );
+    await pool.query(`DELETE FROM courses WHERE courses_id = $1`, [courseId]);
 
     res.status(200).json({
       message: "Course deleted successfully",
@@ -197,7 +239,7 @@ export const getApprovedCoursesForInstructor = async (req, res) => {
         AND c.instructor_id = $1
       ORDER BY c.created_at DESC
       `,
-      [instructorId]
+      [instructorId],
     );
 
     res.status(200).json(result.rows);
@@ -218,7 +260,7 @@ export const getInstructorCourseStats = async (req, res) => {
       FROM courses
       WHERE instructor_id = $1
       `,
-      [instructorId]
+      [instructorId],
     );
 
     res.json(rows[0]);
@@ -253,7 +295,7 @@ export const getCourseById = async (req, res) => {
 
       WHERE c.courses_id = $1
       `,
-      [courseId]
+      [courseId],
     );
 
     if (rows.length === 0) {
@@ -289,7 +331,7 @@ export const exploreCourses = async (req, res) => {
       )
       ORDER BY c.created_at DESC
       `,
-      [studentId]
+      [studentId],
     );
 
     res.json(rows);
@@ -298,5 +340,3 @@ export const exploreCourses = async (req, res) => {
     res.status(500).json({ message: "Failed to load explore courses" });
   }
 };
-
-
