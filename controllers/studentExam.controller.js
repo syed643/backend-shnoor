@@ -26,64 +26,6 @@ export const getStudentExams = async (req, res) => {
   res.json(rows);
 };
 
-{
-  /*export const getExamForAttempt = async (req, res) => {
-  const { examId } = req.params;
-  const studentId = req.user.id;
-
-  // Check enrollment
-  const enrolled = await pool.query(
-    `
-    SELECT 1
-    FROM student_courses sc
-    JOIN exams e ON e.course_id = sc.course_id
-    WHERE sc.student_id = $1 AND e.exam_id = $2
-    `,
-    [studentId, examId],
-  );
-
-  if (enrolled.rowCount === 0) {
-    return res.status(403).json({ message: "Not enrolled" });
-  }
-
-  const { rows } = await pool.query(
-    `
-  SELECT
-    e.exam_id,
-    e.title,
-    e.duration,
-    e.pass_percentage AS pass_score,
-
-    COALESCE(
-      json_agg(
-        json_build_object(
-          'id', q.question_id,
-          'text', q.question_text,
-          'type', q.question_type,
-          'marks', q.marks,
-          'options', (
-            SELECT json_agg(o.option_text)
-            FROM exam_mcq_options o
-            WHERE o.question_id = q.question_id
-          )
-        )
-        ORDER BY q.question_order
-      ) FILTER (WHERE q.question_id IS NOT NULL),
-      '[]'
-    ) AS questions
-
-  FROM exams e
-  LEFT JOIN exam_questions q ON q.exam_id = e.exam_id
-  WHERE e.exam_id = $1
-  GROUP BY e.exam_id
-  `,
-    [examId],
-  );
-
-  res.json(rows[0]);
-};*/
-}
-
 export const getExamForAttempt = async (req, res) => {
   try {
     const { examId } = req.params;
@@ -184,6 +126,60 @@ export const submitExam = async (req, res) => {
     const studentId = req.user.id;
     const { answers } = req.body;
 
+    /* =========================
+       1️⃣ PREVENT RE-ATTEMPT
+    ========================= */
+    const attempted = await pool.query(
+      `
+      SELECT 1
+      FROM exam_submissions
+      WHERE exam_id = $1 AND student_id = $2
+      `,
+      [examId, studentId]
+    );
+
+    if (attempted.rowCount > 0) {
+      return res.status(400).json({
+        message: "Exam already submitted",
+      });
+    }
+
+    /* =========================
+       2️⃣ SAVE RAW SUBMISSION
+       (NO EVALUATION HERE)
+    ========================= */
+    await pool.query(
+      `
+      INSERT INTO exam_submissions
+        (exam_id, student_id, answers, status, submitted_at)
+      VALUES ($1, $2, $3, 'SUBMITTED', NOW())
+      `,
+      [examId, studentId, answers]
+    );
+
+    /* =========================
+       3️⃣ RESPONSE
+    ========================= */
+    return res.status(200).json({
+      message: "Exam submitted successfully",
+      status: "SUBMITTED",
+    });
+
+  } catch (err) {
+    console.error("submitExam error:", err);
+    return res.status(500).json({
+      message: "Failed to submit exam",
+    });
+  }
+};
+
+
+{/*export const submitExam = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+    const { answers } = req.body;
+
     // 1️⃣ Prevent re-attempt
     const attempted = await pool.query(
       `
@@ -268,4 +264,4 @@ export const submitExam = async (req, res) => {
       message: "Failed to submit exam",
     });
   }
-};
+};*/}
