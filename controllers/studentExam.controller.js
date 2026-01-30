@@ -126,9 +126,6 @@ export const submitExam = async (req, res) => {
     const studentId = req.user.id;
     const { answers } = req.body;
 
-    /* =========================
-       1️⃣ PREVENT RE-ATTEMPT
-    ========================= */
     const attempted = await pool.query(
       `
       SELECT 1
@@ -145,24 +142,19 @@ export const submitExam = async (req, res) => {
     }
 
     /* =========================
-       2️⃣ SAVE RAW SUBMISSION
-       (NO EVALUATION HERE)
+       2️⃣ SAVE SUBMISSION
     ========================= */
     await pool.query(
       `
       INSERT INTO exam_submissions
-        (exam_id, student_id, answers, status, submitted_at)
-      VALUES ($1, $2, $3, 'SUBMITTED', NOW())
+        (exam_id, student_id, answers, submitted_at)
+      VALUES ($1, $2, $3, NOW())
       `,
       [examId, studentId, answers]
     );
 
-    /* =========================
-       3️⃣ RESPONSE
-    ========================= */
     return res.status(200).json({
       message: "Exam submitted successfully",
-      status: "SUBMITTED",
     });
 
   } catch (err) {
@@ -172,6 +164,7 @@ export const submitExam = async (req, res) => {
     });
   }
 };
+
 
 
 {/*export const submitExam = async (req, res) => {

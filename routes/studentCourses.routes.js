@@ -2,7 +2,7 @@ import express from "express";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
-import { getStudentCourseById, enrollStudent, checkEnrollmentStatus, getMyCourses } from "../controllers/studentCourses.controller.js";
+import { getStudentCourseById, enrollStudent, checkEnrollmentStatus, getMyCourses,getRecommendedCourses } from "../controllers/studentCourses.controller.js";
 import { markModuleCompleted } from "../controllers/studentProgress.controller.js";
 import { getStudentDashboard } from "../controllers/student.controller.js";
 
@@ -55,5 +55,14 @@ router.get(
   roleGuard("student", "user"),
   getMyCourses
 );
+
+router.get(
+  "/recommendations",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student"),
+  getRecommendedCourses
+);
+
 
 export default router;

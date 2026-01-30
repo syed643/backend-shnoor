@@ -11,7 +11,7 @@ const pool = new Pool({
 export default pool;
 
 
-{/*}import pkg from "pg";
+{/*import pkg from "pg";
 const { Pool } = pkg;
 
 const pool = new Pool({
@@ -22,5 +22,4 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
 });
 
-export default pool;
-*/}
+export default pool;*/}

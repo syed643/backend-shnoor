@@ -10,26 +10,33 @@ export const addCourse = async (req, res) => {
     status,
     validity_value,
     validity_unit,
+    schedule_start_at,
+    price_type,
+    price_amount,
   } = req.body;
 
   const instructor_id = req.user.id;
 
   try {
+    // ✅ CALCULATE expires_at IN JS (no Postgres interval issues)
     let expiresAt = null;
 
     if (validity_value && validity_unit) {
+      const now = new Date();
+
       if (validity_unit === "days") {
-        expiresAt = `NOW() + INTERVAL '${validity_value} days'`;
+        now.setDate(now.getDate() + Number(validity_value));
       } else if (validity_unit === "months") {
-        expiresAt = `NOW() + INTERVAL '${validity_value} months'`;
+        now.setMonth(now.getMonth() + Number(validity_value));
       } else if (validity_unit === "years") {
-        expiresAt = `NOW() + INTERVAL '${validity_value} years'`;
+        now.setFullYear(now.getFullYear() + Number(validity_value));
       }
+
+      expiresAt = now;
     }
 
     const query = `
-      INSERT INTO courses
-      (
+      INSERT INTO courses (
         instructor_id,
         title,
         description,
@@ -39,32 +46,37 @@ export const addCourse = async (req, res) => {
         status,
         validity_value,
         validity_unit,
-        expires_at
+        expires_at,
+        schedule_start_at,
+        price_type,
+        price_amount
       )
-      VALUES
-      (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9,
-        ${expiresAt ? expiresAt : "NULL"}
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
       )
       RETURNING *
     `;
 
     const values = [
-      instructor_id,
-      title,
-      description,
-      category,
-      thumbnail_url || null,
-      difficulty || null,
-      status === "pending" ? "pending" : "draft",
-      validity_value || null,
-      validity_unit || null,
+      instructor_id,                         // $1
+      title,                                 // $2
+      description,                           // $3
+      category,                              // $4
+      thumbnail_url || null,                 // $5
+      difficulty || null,                    // $6
+      status === "pending" ? "pending" : "draft", // $7
+      validity_value || null,                // $8
+      validity_unit || null,                 // $9
+      expiresAt,                             // $10 ✅ SIMPLE TIMESTAMP
+      schedule_start_at || null,             // $11
+      price_type,                  // $12
+      price_type === "paid" ? price_amount : null, // $13
     ];
 
     const result = await pool.query(query, values);
 
     res.status(201).json({
-      message: "Course created with validity",
+      message: "Course created successfully",
       course: result.rows[0],
     });
   } catch (error) {
@@ -320,7 +332,7 @@ export const exploreCourses = async (req, res) => {
         c.title,
         c.description,
         c.category,
-        c.difficulty AS level,
+        c.difficulty,
         u.full_name AS instructorName
       FROM courses c
       LEFT JOIN users u ON u.user_id = c.instructor_id
