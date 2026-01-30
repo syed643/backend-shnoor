@@ -172,7 +172,17 @@ export const getMyCourses = async (req, res) => {
 
   const { rows } = await pool.query(
     `
-    SELECT c.*
+    SELECT 
+      c.courses_id,
+      c.title,
+      c.description,
+      c.category,
+      c.difficulty,
+      c.thumbnail_url,
+      c.status,
+      c.created_at,
+      c.price_type,
+      c.price_amount
     FROM student_courses sc
     JOIN courses c ON c.courses_id = sc.course_id
     WHERE sc.student_id = $1
@@ -189,7 +199,17 @@ export const getRecommendedCourses = async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT c.*
+      SELECT 
+        c.courses_id,
+        c.title,
+        c.description,
+        c.category,
+        c.difficulty,
+        c.thumbnail_url,
+        c.status,
+        c.created_at,
+        c.price_type,
+        c.price_amount
       FROM courses c
       WHERE c.status = 'approved'
       AND (c.schedule_start_at IS NULL OR c.schedule_start_at <= NOW())
