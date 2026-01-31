@@ -46,7 +46,17 @@ export const getStudentCourseById = async (req, res) => {
        ORDER BY module_order ASC`,
       [courseId],
     );
+    if (modulesResult.rows.length > 0) {
+      const firstModuleId = modulesResult.rows[0].id;
 
+      await pool.query(
+        `INSERT INTO module_progress (student_id, course_id, module_id, last_accessed_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (student_id, module_id)
+     DO UPDATE SET last_accessed_at = NOW()`,
+        [studentId, courseId, firstModuleId],
+      );
+    }
     // 4️⃣ Fetch progress
     const progressResult = await pool.query(
       `SELECT module_id
@@ -220,7 +230,7 @@ export const getRecommendedCourses = async (req, res) => {
       )
       ORDER BY c.created_at DESC
       `,
-      [studentId]
+      [studentId],
     );
 
     res.json(result.rows);
