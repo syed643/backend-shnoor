@@ -104,7 +104,7 @@ export const getStudentDashboard = async (req, res) => {
   SELECT json_build_object(
     'course_id', c.courses_id,
     'title', c.title,
-    'thumbnail', c.thumbnail,
+    'thumbnail', c.thumbnail_url,
     'module_id', mp.module_id
   )
   FROM module_progress mp
