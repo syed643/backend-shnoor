@@ -1,4 +1,5 @@
-{/*import pool from "../db/postgres.js";
+{
+  /*import pool from "../db/postgres.js";
 
 export const getStudentDashboard = async (req, res) => {
   try {
@@ -63,7 +64,8 @@ const studentId = req.user.id;
       message: "Failed to load student dashboard"
     });
   }
-};*/}
+};*/
+}
 
 import pool from "../db/postgres.js";
 export const getStudentDashboard = async (req, res) => {
@@ -83,7 +85,7 @@ export const getStudentDashboard = async (req, res) => {
         last_active_date = CURRENT_DATE
       WHERE user_id = $1
       `,
-      [studentId]
+      [studentId],
     );
 
     // 2️⃣ Fetch dashboard data
@@ -98,34 +100,35 @@ export const getStudentDashboard = async (req, res) => {
           FROM student_courses sc
           WHERE sc.student_id = u.user_id
         ) AS enrolled_count,
+(
+  SELECT json_build_object(
+    'course_id', c.courses_id,
+    'title', c.title,
+    'thumbnail', c.thumbnail,
+    'module_id', mp.module_id
+  )
+  FROM module_progress mp
+  JOIN courses c ON c.courses_id = mp.course_id
+  WHERE mp.student_id = u.user_id
+  ORDER BY mp.completed_at DESC NULLS LAST
+  LIMIT 1
+) AS last_learning
 
-        (
-          SELECT json_build_object(
-            'courseId', mp.course_id,
-            'moduleId', mp.module_id
-          )
-          FROM module_progress mp
-          WHERE mp.student_id = u.user_id
-          ORDER BY mp.completed_at DESC NULLS LAST
-          LIMIT 1
-        ) AS last_learning
 
       FROM users u
       WHERE u.user_id = $1
       `,
-      [studentId]
+      [studentId],
     );
 
     return res.json({
       ...rows[0],
-      assignments_count: 0
+      assignments_count: 0,
     });
-
   } catch (err) {
     console.error("Student dashboard error:", err);
     return res.status(500).json({
-      message: "Failed to load student dashboard"
+      message: "Failed to load student dashboard",
     });
   }
 };
-
