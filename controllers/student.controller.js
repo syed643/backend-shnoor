@@ -110,9 +110,10 @@ export const getStudentDashboard = async (req, res) => {
   FROM module_progress mp
   JOIN courses c ON c.courses_id = mp.course_id
   WHERE mp.student_id = u.user_id
-  ORDER BY mp.module_id DESC NULLS LAST
+  ORDER BY mp.created_at DESC
   LIMIT 1
 ) AS last_learning
+
 
 
       FROM users u
