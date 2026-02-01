@@ -70,6 +70,12 @@ const io = new Server(server, {
     origin: allowedOrigins,
     credentials: true,
   },
+  transports: ['websocket', 'polling'],
+  pingInterval: 25000,
+  pingTimeout: 60000,
+  maxHttpBufferSize: 1e6,
+  upgradeTimeout: 10000,
+  allowEIO3: false,
 });
 
 io.on("connection", (socket) => {
@@ -140,6 +146,7 @@ io.on("connection", (socket) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Test database connection before starting server
 pool.query("SELECT NOW()")
@@ -149,8 +156,8 @@ pool.query("SELECT NOW()")
     // Fix any missing chat columns
     await verifyChatSchema();
 
-    server.listen(PORT, () => {
-      console.log(`✅ Server running on port ${PORT}`);
+    server.listen(PORT, HOST, () => {
+      console.log(`✅ Server running on ${HOST}:${PORT}`);
     });
   })
   .catch((err) => {
