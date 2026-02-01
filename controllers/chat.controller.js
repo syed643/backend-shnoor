@@ -173,7 +173,7 @@ export const getMessages = async (req, res) => {
     const messages = result.rows.map((msg) => ({
       ...msg,
       attachment_url: msg.attachment_file_id
-        ? `${baseUrl}/api/files/${msg.attachment_file_id}`
+        ? `${baseUrl}/api/media/${msg.attachment_file_id}`
         : null,
     }));
 
