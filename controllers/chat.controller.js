@@ -3,17 +3,17 @@ import pool from "../db/postgres.js";
 // Initialize Tables
 // Initialize Tables (Reset)
 export const initChatTables = async () => {
-    try {
-        await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
+  try {
+    await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
 
-        console.log("Re-initializing Chat Schemas (UUID Mode)...");
-        // Drop tables to fix schema mismatches
-        await pool.query(`DROP TABLE IF EXISTS messages CASCADE;`);
-        await pool.query(`DROP TABLE IF EXISTS chats CASCADE;`);
-        await pool.query(`DROP TABLE IF EXISTS files CASCADE;`);
+    console.log("Re-initializing Chat Schemas (UUID Mode)...");
+    // Drop tables to fix schema mismatches
+    await pool.query(`DROP TABLE IF EXISTS messages CASCADE;`);
+    await pool.query(`DROP TABLE IF EXISTS chats CASCADE;`);
+    await pool.query(`DROP TABLE IF EXISTS files CASCADE;`);
 
-        // Files Table
-        await pool.query(`
+    // Files Table
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS files (
                 file_id SERIAL PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -23,8 +23,8 @@ export const initChatTables = async () => {
             );
         `);
 
-        // Chats Table
-        await pool.query(`
+    // Chats Table
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS chats (
                 chat_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 instructor_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -35,8 +35,8 @@ export const initChatTables = async () => {
             );
         `);
 
-        // Messages Table
-        await pool.query(`
+    // Messages Table
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS messages (
                 message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 chat_id UUID NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE,
@@ -51,20 +51,20 @@ export const initChatTables = async () => {
             );
         `);
 
-        console.log("✅ Chat tables initialized successfully (UUIDs)");
-    } catch (err) {
-        console.error("❌ Error initializing chat tables:", err);
-    }
+    console.log("✅ Chat tables initialized successfully (UUIDs)");
+  } catch (err) {
+    console.error("❌ Error initializing chat tables:", err);
+  }
 };
 
 // Verify/Fix Schema (Non-destructive)
 export const verifyChatSchema = async () => {
-    console.log("🔍 Verifying Chat Schema...");
-    try {
-        await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
+  console.log("🔍 Verifying Chat Schema...");
+  try {
+    await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
 
-        // Ensure tables exist
-        await pool.query(`
+    // Ensure tables exist
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS chats (
                 chat_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 instructor_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -75,19 +75,19 @@ export const verifyChatSchema = async () => {
             );
         `);
 
-        // Add updated_at if missing
-        await pool.query(`
+    // Add updated_at if missing
+    await pool.query(`
             ALTER TABLE chats 
             ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
         `);
 
-        // Add is_read if missing
-        await pool.query(`
+    // Add is_read if missing
+    await pool.query(`
             ALTER TABLE messages 
             ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
         `);
 
-        await pool.query(`
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS messages (
                 message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 chat_id UUID NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE,
@@ -102,17 +102,17 @@ export const verifyChatSchema = async () => {
             );
         `);
 
-        console.log("✅ Chat schema verified");
-    } catch (err) {
-        console.error("❌ Schema verification failed:", err);
-    }
+    console.log("✅ Chat schema verified");
+  } catch (err) {
+    console.error("❌ Schema verification failed:", err);
+  }
 };
 
 // GET /api/chats
 export const getMyChats = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const query = `
+  try {
+    const userId = req.user.id;
+    const query = `
             SELECT 
                 c.chat_id,
                 c.created_at,
@@ -142,19 +142,20 @@ export const getMyChats = async (req, res) => {
             WHERE c.student_id = $1 OR c.instructor_id = $1
             ORDER BY c.updated_at DESC;
         `;
-        const result = await pool.query(query, [userId]);
-        res.json(result.rows);
-    } catch (err) {
-        console.error("GET /api/chats Error:", err);
-        res.status(500).json({ message: "Server Error", error: err.message });
-    }
+    const result = await pool.query(query, [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/chats Error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
 };
 
 // GET /api/chats/messages/:chatId
 export const getMessages = async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const result = await pool.query(`
+  try {
+    const { chatId } = req.params;
+    const result = await pool.query(
+      `
             SELECT 
                 m.*,
                 u.firebase_uid as sender_uid,
@@ -163,135 +164,146 @@ export const getMessages = async (req, res) => {
             JOIN users u ON m.sender_id = u.user_id
             WHERE m.chat_id = $1
             ORDER BY m.created_at ASC
-        `, [chatId]);
+        `,
+      [chatId],
+    );
 
-        const messages = result.rows.map(msg => ({
-            ...msg,
-            attachment_url: msg.attachment_file_id
-                ? `${process.env.VITE_API_URL || 'http://localhost:5000'}/api/files/${msg.attachment_file_id}`
-                : null
-        }));
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
 
-        res.json(messages);
-    } catch (err) {
-        console.error("GET /messages Error:", err);
-        res.status(500).json({ message: "Server Error" });
-    }
+    const messages = result.rows.map((msg) => ({
+      ...msg,
+      attachment_url: msg.attachment_file_id
+        ? `${baseUrl}/api/files/${msg.attachment_file_id}`
+        : null,
+    }));
+
+    res.json(messages);
+  } catch (err) {
+    console.error("GET /messages Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
 };
 
 // POST /api/chats (Start a new conversation)
 export const createChat = async (req, res) => {
-    console.log("🔵 createChat endpoint hit");
-    console.log("🔵 User from req.user:", req.user);
-    console.log("🔵 Request body:", req.body);
+  console.log("🔵 createChat endpoint hit");
+  console.log("🔵 User from req.user:", req.user);
+  console.log("🔵 Request body:", req.body);
 
-    try {
-        const { recipientId } = req.body;
-        const userId = req.user.id;
+  try {
+    const { recipientId } = req.body;
+    const userId = req.user.id;
 
-        console.log("🔵 Creating chat between:", userId, "and", recipientId);
+    console.log("🔵 Creating chat between:", userId, "and", recipientId);
 
-        const me = await pool.query("SELECT role FROM users WHERE user_id = $1", [userId]);
-        const other = await pool.query("SELECT role FROM users WHERE user_id = $1", [recipientId]);
+    const me = await pool.query("SELECT role FROM users WHERE user_id = $1", [
+      userId,
+    ]);
+    const other = await pool.query(
+      "SELECT role FROM users WHERE user_id = $1",
+      [recipientId],
+    );
 
-        if (me.rows.length === 0 || other.rows.length === 0) {
-            console.log("❌ User not found");
-            return res.status(404).json({ message: "User not found" });
-        }
-
-        let studentId, instructorId;
-        const role = me.rows[0].role.toLowerCase(); // standardize check
-        if (role === 'student' || role === 'learner') {
-            studentId = userId;
-            instructorId = recipientId;
-        } else {
-            studentId = recipientId;
-            instructorId = userId;
-        }
-
-        console.log("🔵 Student:", studentId, "Instructor:", instructorId);
-
-        // Check if exists
-        const check = await pool.query(
-            "SELECT chat_id FROM chats WHERE student_id = $1 AND instructor_id = $2",
-            [studentId, instructorId]
-        );
-
-        if (check.rows.length > 0) {
-            console.log("✅ Chat exists:", check.rows[0].chat_id);
-            return res.json({ chat_id: check.rows[0].chat_id, isNew: false });
-        }
-
-        const newChat = await pool.query(
-            "INSERT INTO chats (student_id, instructor_id) VALUES ($1, $2) RETURNING chat_id",
-            [studentId, instructorId]
-        );
-
-        console.log("✅ New chat created:", newChat.rows[0].chat_id);
-        res.json({ chat_id: newChat.rows[0].chat_id, isNew: true });
-    } catch (err) {
-        console.error("❌ Create Chat Error:", err);
-        res.status(500).json({ message: "Server Error", error: err.message });
+    if (me.rows.length === 0 || other.rows.length === 0) {
+      console.log("❌ User not found");
+      return res.status(404).json({ message: "User not found" });
     }
+
+    let studentId, instructorId;
+    const role = me.rows[0].role.toLowerCase(); // standardize check
+    if (role === "student" || role === "learner") {
+      studentId = userId;
+      instructorId = recipientId;
+    } else {
+      studentId = recipientId;
+      instructorId = userId;
+    }
+
+    console.log("🔵 Student:", studentId, "Instructor:", instructorId);
+
+    // Check if exists
+    const check = await pool.query(
+      "SELECT chat_id FROM chats WHERE student_id = $1 AND instructor_id = $2",
+      [studentId, instructorId],
+    );
+
+    if (check.rows.length > 0) {
+      console.log("✅ Chat exists:", check.rows[0].chat_id);
+      return res.json({ chat_id: check.rows[0].chat_id, isNew: false });
+    }
+
+    const newChat = await pool.query(
+      "INSERT INTO chats (student_id, instructor_id) VALUES ($1, $2) RETURNING chat_id",
+      [studentId, instructorId],
+    );
+
+    console.log("✅ New chat created:", newChat.rows[0].chat_id);
+    res.json({ chat_id: newChat.rows[0].chat_id, isNew: true });
+  } catch (err) {
+    console.error("❌ Create Chat Error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
 };
 
 // PUT /api/chats/read
 export const markRead = async (req, res) => {
-    try {
-        const { chatId } = req.body;
-        const userId = req.user.id;
+  try {
+    const { chatId } = req.body;
+    const userId = req.user.id;
 
-        await pool.query(
-            "UPDATE messages SET is_read = TRUE WHERE chat_id = $1 AND sender_id != $2",
-            [chatId, userId]
-        );
-        res.sendStatus(200);
-    } catch (err) {
-        res.status(500).json({ message: "Server Error" });
-    }
+    await pool.query(
+      "UPDATE messages SET is_read = TRUE WHERE chat_id = $1 AND sender_id != $2",
+      [chatId, userId],
+    );
+    res.sendStatus(200);
+  } catch (err) {
+    res.status(500).json({ message: "Server Error" });
+  }
 };
 
 // POST /api/files/upload
 export const uploadFile = async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).send("No file uploaded");
-        const { originalname, mimetype, buffer } = req.file;
+  try {
+    if (!req.file) return res.status(400).send("No file uploaded");
+    const { originalname, mimetype, buffer } = req.file;
 
-        const newFile = await pool.query(
-            "INSERT INTO files (filename, mime_type, data) VALUES ($1, $2, $3) RETURNING file_id",
-            [originalname, mimetype, buffer]
-        );
+    const newFile = await pool.query(
+      "INSERT INTO files (filename, mime_type, data) VALUES ($1, $2, $3) RETURNING file_id",
+      [originalname, mimetype, buffer],
+    );
 
-        res.json({ file_id: newFile.rows[0].file_id });
-    } catch (err) {
-        console.error("Upload Error:", err);
-        res.status(500).send("File upload failed");
-    }
+    res.json({ file_id: newFile.rows[0].file_id });
+  } catch (err) {
+    console.error("Upload Error:", err);
+    res.status(500).send("File upload failed");
+  }
 };
 
 // GET /api/files/:id
 export const serveFile = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const file = await pool.query("SELECT * FROM files WHERE file_id = $1", [id]);
+  try {
+    const { id } = req.params;
+    const file = await pool.query("SELECT * FROM files WHERE file_id = $1", [
+      id,
+    ]);
 
-        if (file.rows.length === 0) return res.status(404).send("File not found");
+    if (file.rows.length === 0) return res.status(404).send("File not found");
 
-        const { mime_type, data, filename } = file.rows[0];
-        res.setHeader('Content-Type', mime_type);
-        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-        res.send(data);
-    } catch (err) {
-        console.error("File Serve Error:", err);
-        res.status(500).send("Error serving file");
-    }
+    const { mime_type, data, filename } = file.rows[0];
+    res.setHeader("Content-Type", mime_type);
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.send(data);
+  } catch (err) {
+    console.error("File Serve Error:", err);
+    res.status(500).send("Error serving file");
+  }
 };
 
 // GET /api/chats/available-students (For Instructors)
 export const getAvailableStudents = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const query = `
+  try {
+    const userId = req.user.id;
+    const query = `
             SELECT 
                 u.user_id,
                 u.full_name,
@@ -309,19 +321,19 @@ export const getAvailableStudents = async (req, res) => {
             AND u.status = 'active'
             ORDER BY u.full_name ASC;
         `;
-        const result = await pool.query(query, [userId]);
-        res.json(result.rows);
-    } catch (err) {
-        console.error("GET /available-students Error:", err);
-        res.status(500).json({ message: "Server Error", error: err.message });
-    }
+    const result = await pool.query(query, [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /available-students Error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
 };
 
 // GET /api/chats/available-instructors (For Students)
 export const getAvailableInstructors = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const query = `
+  try {
+    const userId = req.user.id;
+    const query = `
             SELECT 
                 u.user_id,
                 u.full_name,
@@ -339,10 +351,10 @@ export const getAvailableInstructors = async (req, res) => {
             AND u.status = 'active'
             ORDER BY u.full_name ASC;
         `;
-        const result = await pool.query(query, [userId]);
-        res.json(result.rows);
-    } catch (err) {
-        console.error("GET /available-instructors Error:", err);
-        res.status(500).json({ message: "Server Error", error: err.message });
-    }
+    const result = await pool.query(query, [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /available-instructors Error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
 };
