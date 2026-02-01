@@ -291,10 +291,7 @@ export const serveFile = async (req, res) => {
 
     const { mime_type, data, filename } = file.rows[0];
     res.setHeader("Content-Type", mime_type);
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
-    );
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
     res.send(data);
   } catch (err) {
     console.error("File Serve Error:", err);

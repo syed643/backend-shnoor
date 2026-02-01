@@ -30,7 +30,7 @@ router.get("/messages/:chatId", getMessages);
 router.get("/available-students", getAvailableStudents);
 router.get("/available-instructors", getAvailableInstructors);
 router.post("/", createChat);
-router.post("/media/upload", upload.single('file'), uploadFile);
+router.post("/upload", upload.single('file'), uploadFile);
 router.put("/read", markRead);
 
 console.log("✅ Chat routes registered");
