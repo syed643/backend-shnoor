@@ -8,7 +8,8 @@ import {
     markRead,
     uploadFile,
     getAvailableStudents,
-    getAvailableInstructors
+    getAvailableInstructors,
+    serveFile
 } from "../controllers/chat.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
@@ -24,6 +25,7 @@ router.use(firebaseAuth);
 router.use(attachUser);
 
 router.get("/", getMyChats);
+router.get("/media/:id", serveFile);
 router.get("/messages/:chatId", getMessages);
 router.get("/available-students", getAvailableStudents);
 router.get("/available-instructors", getAvailableInstructors);
