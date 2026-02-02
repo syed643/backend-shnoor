@@ -1,17 +1,25 @@
 import express from "express";
-import { getChallenges, getChallengeById } from "../controllers/practice.controller.js";
+
 import firebaseAuth from "../middlewares/firebaseAuth.js";
+import roleGuard from "../middlewares/roleGuard.js";
+
+import {
+  getChallenges,
+  getChallengeById,
+  createChallenge,
+  deleteChallenge,
+} from "../controllers/practice.controller.js";
 
 const router = express.Router();
 
+// 🔐 All routes require authentication
 router.use(firebaseAuth);
 
+// 📖 Public to all authenticated users (students, instructors, admins)
 router.get("/", getChallenges);
 router.get("/:id", getChallengeById);
 
-import roleGuard from "../middlewares/roleGuard.js";
-import { createChallenge, deleteChallenge } from "../controllers/practice.controller.js";
-
+// ✍️ Only instructor & admin can modify
 router.post("/", roleGuard("instructor", "admin"), createChallenge);
 router.delete("/:id", roleGuard("instructor", "admin"), deleteChallenge);
 
