@@ -13,6 +13,7 @@ import studentCoursesRoutes from "./routes/studentCourses.routes.js";
 import examRoutes from "./routes/exam.routes.js";
 import studentExamRoutes from "./routes/studentExam.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import practiceRoutes from "./routes/practice.routes.js";
 import { verifyChatSchema } from "./controllers/chat.controller.js";
 import http from "http";
 import { Server } from "socket.io";
@@ -51,6 +52,7 @@ app.use("/api/student", studentCoursesRoutes)
 app.use("/api/exams", examRoutes);
 app.use("/api/student/exams", studentExamRoutes);
 app.use("/api/chats", chatRoutes);
+app.use("/api/practice",practiceRoutes);      
 
 
 
