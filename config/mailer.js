@@ -18,7 +18,6 @@ const transporter = nodemailer.createTransport({
     // allow configuring TLS verification from env (defaults to strict)
     rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== "false",
   },
-  family: 4,
   connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT || 30000),
 });
 
