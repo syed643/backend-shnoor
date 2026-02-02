@@ -1,8 +1,4 @@
-import transporter from "../config/mailer.js";
-
-// Supports both call styles:
-//  sendInstructorInvite(email, name)
-//  sendInstructorInvite({ email, name })
+import { sendMail } from "../config/mailer.js"; // the resend mailer you created
 export const sendInstructorInvite = async (emailOrObj, name) => {
   let email;
   let displayName;
@@ -21,11 +17,9 @@ export const sendInstructorInvite = async (emailOrObj, name) => {
   }
 
   try {
-    await transporter.sendMail({
-      from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+    await sendMail({
       to: email,
       subject: "You’ve been invited as an Instructor",
-      text: `Hello ${displayName || ""},\n\nYou have been added as an Instructor at SHNOOR LMS.\n\nLogin here: https://lms.shnoor.com/login`,
       html: `
         <h2>Welcome to SHNOOR LMS 🎓</h2>
         <p>Hello <b>${displayName || ""}</b>,</p>
