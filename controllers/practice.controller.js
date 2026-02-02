@@ -3,7 +3,7 @@ import pool from "../db/postgres.js";
 // Create a new challenge
 export const createChallenge = async (req, res) => {
     try {
-        const { title, description, type = 'coding', difficulty, starter_code, test_cases } = req.body;
+        const { title, description, type = 'code', difficulty, starter_code, test_cases } = req.body;
 
         // Basic validation
         if (!title || !description || !difficulty) {
