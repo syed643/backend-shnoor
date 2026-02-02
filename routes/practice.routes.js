@@ -1,8 +1,8 @@
 import express from "express";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
-import roleGuard from "../middlewares/roleGuard.js";
 import attachUser from "../middlewares/attachUser.js";
+import roleGuard from "../middlewares/roleGuard.js";
 
 import {
   getChallenges,
@@ -13,15 +13,18 @@ import {
 
 const router = express.Router();
 
-// 🔐 All routes require authentication
+// 🔐 Step 1: verify firebase token
 router.use(firebaseAuth);
 
-// 📖 Public to all authenticated users (students, instructors, admins)
-router.get("/", getChallenges,attachUser);
-router.get("/:id", getChallengeById,attachUser);
+// 🔥 Step 2: load DB user into req.user
+router.use(attachUser);
 
-// ✍️ Only instructor & admin can modify
-router.post("/", roleGuard("instructor", "admin"),attachUser,createChallenge);
-router.delete("/:id", roleGuard("instructor", "admin"), attachUser,deleteChallenge);
+// 📖 All authenticated users
+router.get("/", getChallenges);
+router.get("/:id", getChallengeById);
+
+// ✍️ Only instructor & admin
+router.post("/", roleGuard("instructor", "admin"), createChallenge);
+router.delete("/:id", roleGuard("instructor", "admin"), deleteChallenge);
 
 export default router;
