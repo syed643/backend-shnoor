@@ -21,7 +21,7 @@ import { initChatTables, serveFile } from "./controllers/chat.controller.js";
 const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
-
+const baseUrl = `${req.protocol}://${req.get("host")}`;
 const allowedOrigins = ["http://localhost:5173", process.env.FRONTEND_URL];
 
 const io = new Server(server, {

@@ -115,7 +115,7 @@ export const getMessages = async (req, res) => {
         `,
       [chatId],
     );
-
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
     const messages = result.rows.map((msg) => ({
       ...msg,
       attachment_url: msg.attachment_file_id
