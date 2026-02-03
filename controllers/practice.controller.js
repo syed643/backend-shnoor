@@ -5,17 +5,30 @@ export const createChallenge = async (req, res) => {
     try {
         const { title, description, type = 'code', difficulty, starter_code, test_cases } = req.body;
 
-        // Basic validation
         if (!title || !description || !difficulty) {
             return res.status(400).json({ message: "Title, description, and difficulty are required" });
         }
+
+        // 🔥 Ensure every test case has isPublic
+        const normalizedTestCases = (test_cases || []).map(tc => ({
+            input: tc.input,
+            output: tc.output,
+            isPublic: tc.isPublic === true   // default false if not provided
+        }));
 
         const result = await pool.query(
             `INSERT INTO practice_challenges 
             (title, description, type, difficulty, starter_code, test_cases) 
             VALUES ($1, $2, $3, $4, $5, $6) 
             RETURNING *`,
-            [title, description, type, difficulty, starter_code, JSON.stringify(test_cases)]
+            [
+                title,
+                description,
+                type,
+                difficulty,
+                starter_code,
+                JSON.stringify(normalizedTestCases)
+            ]
         );
 
         res.status(201).json(result.rows[0]);
@@ -24,6 +37,7 @@ export const createChallenge = async (req, res) => {
         res.status(500).json({ message: "Server Error" });
     }
 };
+
 
 // Delete a challenge
 export const deleteChallenge = async (req, res) => {
