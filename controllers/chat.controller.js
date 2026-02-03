@@ -1,7 +1,6 @@
 import pool from "../db/postgres.js";
 
 // Initialize Tables
-// Initialize Tables (Reset)
 export const initChatTables = async () => {
   try {
     await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
@@ -12,7 +11,7 @@ export const initChatTables = async () => {
     await pool.query(`DROP TABLE IF EXISTS chats CASCADE;`);
     await pool.query(`DROP TABLE IF EXISTS files CASCADE;`);
 
-    // Files Table
+    // Files Table (SERIAL is fine for files, internal ID)
     await pool.query(`
             CREATE TABLE IF NOT EXISTS files (
                 file_id SERIAL PRIMARY KEY,
@@ -23,7 +22,7 @@ export const initChatTables = async () => {
             );
         `);
 
-    // Chats Table
+    // Chats Table - Using UUID for user_id references (Fix for type mismatch)
     await pool.query(`
             CREATE TABLE IF NOT EXISTS chats (
                 chat_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -54,57 +53,6 @@ export const initChatTables = async () => {
     console.log("✅ Chat tables initialized successfully (UUIDs)");
   } catch (err) {
     console.error("❌ Error initializing chat tables:", err);
-  }
-};
-
-// Verify/Fix Schema (Non-destructive)
-export const verifyChatSchema = async () => {
-  console.log("🔍 Verifying Chat Schema...");
-  try {
-    await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
-
-    // Ensure tables exist
-    await pool.query(`
-            CREATE TABLE IF NOT EXISTS chats (
-                chat_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                instructor_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                student_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                CONSTRAINT unique_instructor_student_chat UNIQUE (instructor_id, student_id)
-            );
-        `);
-
-    // Add updated_at if missing
-    await pool.query(`
-            ALTER TABLE chats 
-            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-        `);
-
-    // Add is_read if missing
-    await pool.query(`
-            ALTER TABLE messages 
-            ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
-        `);
-
-    await pool.query(`
-            CREATE TABLE IF NOT EXISTS messages (
-                message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                chat_id UUID NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE,
-                sender_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                receiver_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                text TEXT NOT NULL,
-                attachment_file_id INT REFERENCES files(file_id),
-                attachment_type VARCHAR(50),
-                attachment_name TEXT,
-                is_read BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
-    console.log("✅ Chat schema verified");
-  } catch (err) {
-    console.error("❌ Schema verification failed:", err);
   }
 };
 
@@ -167,8 +115,6 @@ export const getMessages = async (req, res) => {
         `,
       [chatId],
     );
-
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
 
     const messages = result.rows.map((msg) => ({
       ...msg,
