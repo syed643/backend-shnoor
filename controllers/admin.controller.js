@@ -195,7 +195,7 @@ export const approveUser = async (req, res) => {
     const { userId } = req.params;
 
     const result = await pool.query(
-      `SELECT user_id, role, status, created_at, headline FROM users WHERE user_id = $1`,
+      `SELECT user_id, full_name, role, status, created_at, headline FROM users WHERE user_id = $1`,
       [userId],
     );
 
@@ -239,6 +239,13 @@ export const approveUser = async (req, res) => {
       try {
         console.log(`🔍 Starting group assignment for user ${userId}`);
         console.log(`   User Info: ${user.full_name}, Created at: ${user.created_at}, Headline: ${user.headline}`);
+
+        // Get all groups for debugging
+        const allGroups = await pool.query(`SELECT group_id, group_name, start_date, end_date FROM groups`);
+        console.log(`📊 Total groups in DB: ${allGroups.rows.length}`);
+        allGroups.rows.forEach(g => {
+          console.log(`   - ${g.group_name}: dates ${g.start_date ? '✅' : '❌'} start=${g.start_date}, end=${g.end_date}`);
+        });
 
         // Strategy 1: Timestamp-based groups (date-based cohorts)
         // Find groups where user registration date falls within group date range
@@ -308,6 +315,37 @@ export const approveUser = async (req, res) => {
           }
         } else {
           console.log(`⚠️  User has no headline/college info`);
+          
+          // Strategy 3: If no groups match date ranges and no college, try assigning to ANY group without dates
+          console.log(`🔄 Trying fallback: assigning to groups without date restrictions...`);
+          try {
+            const anyGroup = await pool.query(
+              `SELECT group_id, group_name FROM groups 
+               WHERE (start_date IS NULL OR end_date IS NULL)
+               LIMIT 1`
+            );
+            
+            if (anyGroup.rows.length > 0) {
+              console.log(`   💡 Found manual group: ${anyGroup.rows[0].group_name}`);
+              try {
+                await pool.query(
+                  `INSERT INTO group_users (group_id, user_id, assigned_at)
+                   VALUES ($1, $2, NOW())
+                   ON CONFLICT (group_id, user_id) DO NOTHING`,
+                  [anyGroup.rows[0].group_id, userId]
+                );
+                assignedGroups.push(anyGroup.rows[0].group_name);
+                console.log(`   ✅ Added to fallback group: ${anyGroup.rows[0].group_name}`);
+              } catch (insertErr) {
+                console.error(`   ❌ Failed to add to fallback group:`, insertErr.message);
+              }
+            } else {
+              console.log(`   ⚠️  No groups available (manual or date-based)`);
+            }
+          } catch (err) {
+            console.error(`   ❌ Error checking fallback groups:`, err.message);
+          }
+
         }
 
         console.log(`✅ Group assignment completed. Total groups assigned: ${assignedGroups.length}`);
