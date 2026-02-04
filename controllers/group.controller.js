@@ -67,7 +67,7 @@ export const getGroups = async (req, res) => {
                  WHERE u.created_at >= g.start_date
                    AND u.created_at <= g.end_date
                    AND u.role = 'student'
-                   AND (u."headline/college_name" IS NULL OR u."headline/college_name" = '')
+                   AND (u.headline IS NULL OR u.headline = '')
                )
                -- College manual groups (admin-created, date-open)
                WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NULL THEN (
@@ -77,7 +77,7 @@ export const getGroups = async (req, res) => {
                ELSE (
                  SELECT COUNT(*)::int
                  FROM users u
-                 WHERE UPPER(u."headline/college_name") = UPPER(g.group_name)
+                 WHERE UPPER(u.headline) = UPPER(g.group_name)
                    AND u.role = 'student'
                )
              END AS user_count
@@ -99,7 +99,7 @@ export const getGroups = async (req, res) => {
                    WHERE u.created_at >= g.start_date
                      AND u.created_at <= g.end_date
                      AND u.role = 'student' AND u.status='active'
-                     AND (u."headline/college_name" IS NULL OR u."headline/college_name" = '')
+                     AND (u.headline IS NULL OR u.headline = '')
                  )
                  WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NULL THEN (
                    SELECT COUNT(*)::int FROM group_users gu WHERE gu.group_id = g.group_id
@@ -107,7 +107,7 @@ export const getGroups = async (req, res) => {
                  ELSE (
                    SELECT COUNT(*)::int
                    FROM users u
-                   WHERE UPPER(u."headline/college_name") = UPPER(g.group_name)
+                   WHERE UPPER(u.headline) = UPPER(g.group_name)
                      AND u.role = 'student'
                  )
                END AS user_count
@@ -122,7 +122,7 @@ export const getGroups = async (req, res) => {
                (
                  SELECT COUNT(*)::int
                  FROM users u
-                 WHERE UPPER(TRIM(u."headline/college_name")) = UPPER(TRIM(cg.group_name))
+                 WHERE UPPER(TRIM(u.headline)) = UPPER(TRIM(cg.group_name))
                    AND u.role = 'student'
                ) AS user_count
         FROM college_groups cg
@@ -179,7 +179,7 @@ export const getGroup = async (req, res) => {
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count
            FROM users u
-           WHERE u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u."headline/college_name" IS NULL OR u."headline/college_name" = '')`,
+           WHERE u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = '')`,
           [group.start_date, group.end_date]
         );
         group.user_count = userCountResult.rows[0].user_count;
@@ -197,7 +197,7 @@ export const getGroup = async (req, res) => {
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count
            FROM users u
-           WHERE UPPER(u."headline/college_name") = UPPER($1) AND u.role = 'student'`,
+           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student'`,
           [group.group_name]
         );
         group.user_count = userCountResult.rows[0].user_count;
@@ -221,7 +221,7 @@ export const getGroup = async (req, res) => {
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count
            FROM users u
-           WHERE u."headline/college_name" = $1 AND u.role = 'student'`,
+           WHERE u.headline = $1 AND u.role = 'student'`,
           [group.group_name]
         );
         group.user_count = userCountResult.rows[0].user_count;
@@ -272,7 +272,7 @@ export const getGroupUsers = async (req, res) => {
              u.email,
              u.created_at AS assigned_at
            FROM users u
-           WHERE u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u."headline/college_name" IS NULL OR u."headline/college_name" = '')
+           WHERE u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = '')
            ORDER BY u.created_at`,
           [start_date, end_date]
         );
@@ -304,7 +304,7 @@ export const getGroupUsers = async (req, res) => {
              u.email,
              u.created_at AS assigned_at
            FROM users u
-           WHERE UPPER(u."headline/college_name") = UPPER($1) AND u.role = 'student'
+           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student'
            ORDER BY u.created_at`,
           [collegeName]
         );
@@ -325,7 +325,7 @@ export const getGroupUsers = async (req, res) => {
                u.email,
                u.created_at AS assigned_at
              FROM users u
-             WHERE u."headline/college_name" = $1 AND u.role = 'student'
+             WHERE u.headline = $1 AND u.role = 'student'
              ORDER BY u.created_at`,
             [collegeName]
           );
@@ -401,7 +401,7 @@ export const addUserToGroup = async (req, res) => {
     const groupName = groupCheck.rows[0].group_name;
     const updateResult = await pool.query(
       `UPDATE users
-       SET "headline/college_name" = $1
+       SET headline = $1
        WHERE user_id = $2 AND role = 'student' AND status = 'active'`,
       [groupName, userId]
     );
@@ -432,7 +432,7 @@ export const removeUserFromGroup = async (req, res) => {
           return res.status(404).json({ message: "Group not found" });
         }
         // It's college group from view
-        await pool.query(`UPDATE users SET "headline/college_name" = NULL WHERE user_id = $1 AND role = 'student'`, [userId]);
+        await pool.query(`UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`, [userId]);
         return res.status(200).json({ message: "Student removed from college group" });
       } catch (e) {
         console.log("College groups view not available:", e.message);
@@ -453,7 +453,7 @@ export const removeUserFromGroup = async (req, res) => {
     }
 
     // College automatic group from groups table
-    await pool.query(`UPDATE users SET "headline/college_name" = NULL WHERE user_id = $1 AND role = 'student'`, [userId]);
+    await pool.query(`UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`, [userId]);
     return res.status(200).json({ message: "Student removed from college group" });
   } catch (error) {
     console.error("removeUserFromGroup error:", error);
@@ -613,8 +613,8 @@ export const deleteGroup = async (req, res) => {
       // from all its students so the view no longer produces that group.
       await pool.query(
         `UPDATE users
-         SET "headline/college_name" = NULL
-         WHERE "headline/college_name" = $1
+         SET headline = NULL
+         WHERE headline = $1
            AND role = 'student'`,
         [collegeName]
       );
