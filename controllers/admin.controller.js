@@ -238,51 +238,36 @@ export const approveUser = async (req, res) => {
     if (user.role === "student") {
       try {
         console.log(`🔍 Starting group assignment for user ${userId}`);
-        console.log(`   Created at: ${user.created_at}, Headline: ${user.headline}`);
-
-        // Get ALL groups to debug
-        const allGroups = await pool.query(`SELECT group_id, group_name, start_date, end_date, created_by FROM groups`);
-        console.log(`📊 Total groups in database: ${allGroups.rows.length}`);
-        allGroups.rows.forEach(g => {
-          console.log(`   - Group: ${g.group_name}, ID: ${g.group_id}, Dates: ${g.start_date} to ${g.end_date}, created_by: ${g.created_by}`);
-        });
+        console.log(`   User Info: ${user.full_name}, Created at: ${user.created_at}, Headline: ${user.headline}`);
 
         // Strategy 1: Timestamp-based groups (date-based cohorts)
+        // Find groups where user registration date falls within group date range
         if (user.created_at) {
           try {
             const timestampGroups = await pool.query(
               `SELECT group_id, group_name FROM groups 
-               WHERE created_by IS NULL 
-               AND start_date IS NOT NULL 
-               AND end_date IS NOT NULL`
+               WHERE start_date IS NOT NULL 
+               AND end_date IS NOT NULL
+               AND start_date <= $1::timestamp
+               AND end_date >= $1::timestamp`,
+              [user.created_at]
             );
 
-            console.log(`📅 Found ${timestampGroups.rows.length} potential timestamp groups`);
+            console.log(`📅 Found ${timestampGroups.rows.length} matching timestamp groups`);
 
             for (const group of timestampGroups.rows) {
-              // Check if user registration date falls within group date range
-              const checkGroup = await pool.query(
-                `SELECT group_id FROM groups 
-                 WHERE group_id = $1
-                 AND start_date <= $2::timestamp
-                 AND end_date >= $2::timestamp`,
-                [group.group_id, user.created_at]
-              );
-
-              if (checkGroup.rows.length > 0) {
-                console.log(`   ✅ User ${userId} matches group ${group.group_name}`);
-                try {
-                  await pool.query(
-                    `INSERT INTO group_users (group_id, user_id, assigned_at)
-                     VALUES ($1, $2, NOW())
-                     ON CONFLICT (group_id, user_id) DO NOTHING`,
-                    [group.group_id, userId]
-                  );
-                  assignedGroups.push(group.group_name);
-                  console.log(`   ✅ Successfully added user to ${group.group_name}`);
-                } catch (insertErr) {
-                  console.error(`   ❌ Error inserting into group_users:`, insertErr.message);
-                }
+              try {
+                console.log(`   ➕ Adding user to timestamp group: ${group.group_name}`);
+                await pool.query(
+                  `INSERT INTO group_users (group_id, user_id, assigned_at)
+                   VALUES ($1, $2, NOW())
+                   ON CONFLICT (group_id, user_id) DO NOTHING`,
+                  [group.group_id, userId]
+                );
+                assignedGroups.push(group.group_name);
+                console.log(`   ✅ Added to ${group.group_name}`);
+              } catch (insertErr) {
+                console.error(`   ❌ Failed to add to ${group.group_name}:`, insertErr.message);
               }
             }
           } catch (err) {
@@ -291,8 +276,9 @@ export const approveUser = async (req, res) => {
         }
 
         // Strategy 2: College/Headline based groups
+        // If user has a headline/college, add to matching college group
         if (user.headline && user.headline.trim() !== "") {
-          console.log(`👤 Checking for college group: ${user.headline}`);
+          console.log(`👤 Checking for college group matching headline: "${user.headline}"`);
           try {
             const collegeGroup = await pool.query(
               `SELECT group_id, group_name FROM groups 
@@ -310,19 +296,24 @@ export const approveUser = async (req, res) => {
                   [collegeGroup.rows[0].group_id, userId]
                 );
                 assignedGroups.push(collegeGroup.rows[0].group_name);
-                console.log(`   ✅ Successfully added user to college group`);
+                console.log(`   ✅ Added to college group: ${collegeGroup.rows[0].group_name}`);
               } catch (insertErr) {
-                console.error(`   ❌ Error inserting into college group:`, insertErr.message);
+                console.error(`   ❌ Failed to add to college group:`, insertErr.message);
               }
             } else {
-              console.log(`   ⚠️  No college group found for: ${user.headline}`);
+              console.log(`   ⚠️  No college group found for headline: "${user.headline}"`);
             }
           } catch (err) {
             console.error(`   ❌ Error checking college group:`, err.message);
           }
+        } else {
+          console.log(`⚠️  User has no headline/college info`);
         }
 
-        console.log(`✅ Group assignment completed. Assigned to: ${assignedGroups.length ? assignedGroups.join(', ') : 'no groups'}`);
+        console.log(`✅ Group assignment completed. Total groups assigned: ${assignedGroups.length}`);
+        if (assignedGroups.length > 0) {
+          console.log(`   Groups: ${assignedGroups.join(', ')}`);
+        }
       } catch (error) {
         console.error("❌ Error auto-assigning user to groups:", error.message);
       }
@@ -466,3 +457,192 @@ export const debugUserGroups = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+// 🔍 DATABASE SCHEMA DIAGNOSTIC: Check all tables and their structure
+export const diagnosticDatabaseSchema = async (req, res) => {
+  try {
+    const diagnostics = {};
+
+    // 1. Check if tables exist and their structure
+    const tables = ['users', 'groups', 'group_users', 'courses', 'course_assignments'];
+    
+    for (const tableName of tables) {
+      try {
+        const tableInfo = await pool.query(
+          `SELECT column_name, data_type, is_nullable, column_default
+           FROM information_schema.columns
+           WHERE table_name = $1
+           ORDER BY ordinal_position`,
+          [tableName]
+        );
+
+        if (tableInfo.rows.length > 0) {
+          diagnostics[tableName] = {
+            exists: true,
+            columns: tableInfo.rows,
+            columnNames: tableInfo.rows.map(c => c.column_name)
+          };
+        } else {
+          diagnostics[tableName] = { exists: false };
+        }
+      } catch (err) {
+        diagnostics[tableName] = { exists: false, error: err.message };
+      }
+    }
+
+    // 2. Count records in each table
+    try {
+      const userCount = await pool.query(`SELECT COUNT(*) as count FROM users`);
+      diagnostics.userCount = userCount.rows[0].count;
+    } catch (e) { diagnostics.userCount = 'Error'; }
+
+    try {
+      const groupCount = await pool.query(`SELECT COUNT(*) as count FROM groups`);
+      diagnostics.groupCount = groupCount.rows[0].count;
+    } catch (e) { diagnostics.groupCount = 'Error'; }
+
+    try {
+      const groupUsersCount = await pool.query(`SELECT COUNT(*) as count FROM group_users`);
+      diagnostics.groupUsersCount = groupUsersCount.rows[0].count;
+    } catch (e) { diagnostics.groupUsersCount = 'Error'; }
+
+    // 3. Show sample data
+    try {
+      const sampleGroups = await pool.query(`SELECT * FROM groups LIMIT 5`);
+      diagnostics.sampleGroups = sampleGroups.rows;
+    } catch (e) { diagnostics.sampleGroups = []; }
+
+    try {
+      const sampleGroupUsers = await pool.query(`SELECT * FROM group_users LIMIT 5`);
+      diagnostics.sampleGroupUsers = sampleGroupUsers.rows;
+    } catch (e) { diagnostics.sampleGroupUsers = []; }
+
+    try {
+      const pendingStudents = await pool.query(`SELECT user_id, full_name, email, created_at FROM users WHERE role = 'student' AND status = 'pending' LIMIT 5`);
+      diagnostics.pendingStudents = pendingStudents.rows;
+    } catch (e) { diagnostics.pendingStudents = []; }
+
+    // 4. Check constraints and indexes
+    try {
+      const constraints = await pool.query(
+        `SELECT constraint_name, constraint_type
+         FROM information_schema.table_constraints
+         WHERE table_name IN ('group_users', 'groups', 'users')`
+      );
+      diagnostics.constraints = constraints.rows;
+    } catch (e) { diagnostics.constraints = []; }
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      diagnostics: diagnostics,
+      recommendations: generateRecommendations(diagnostics)
+    });
+  } catch (error) {
+    console.error("diagnosticDatabaseSchema error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// ✅ HELPER: Bulk assign all active students to a group
+export const bulkAssignStudentsToGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    // Verify group exists
+    const groupCheck = await pool.query(
+      `SELECT group_id, group_name FROM groups WHERE group_id = $1`,
+      [groupId]
+    );
+
+    if (groupCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    const group = groupCheck.rows[0];
+
+    // Get all active students (not including pending)
+    const activeStudents = await pool.query(
+      `SELECT user_id FROM users WHERE role = 'student' AND status = 'active'`
+    );
+
+    console.log(`📊 Found ${activeStudents.rows.length} active students to assign to group ${group.group_name}`);
+
+    let assignedCount = 0;
+    for (const student of activeStudents.rows) {
+      try {
+        await pool.query(
+          `INSERT INTO group_users (group_id, user_id, assigned_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (group_id, user_id) DO NOTHING`,
+          [groupId, student.user_id]
+        );
+        assignedCount++;
+      } catch (err) {
+        console.error(`Failed to assign student ${student.user_id}:`, err.message);
+      }
+    }
+
+    console.log(`✅ Successfully assigned ${assignedCount} students to group ${group.group_name}`);
+
+    res.json({
+      message: `Successfully assigned ${assignedCount} students to group: ${group.group_name}`,
+      groupId: groupId,
+      groupName: group.group_name,
+      studentsAssigned: assignedCount
+    });
+  } catch (error) {
+    console.error("bulkAssignStudentsToGroup error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+}
+
+// Helper function to generate recommendations
+function generateRecommendations(diagnostics) {
+  const recommendations = [];
+
+  if (!diagnostics.group_users?.exists) {
+    recommendations.push({
+      severity: 'CRITICAL',
+      message: 'group_users table does not exist!',
+      action: 'You need to create the group_users table with columns: group_id, user_id, assigned_at'
+    });
+  }
+
+  if (diagnostics.groupCount === 0 || diagnostics.groupCount === '0') {
+    recommendations.push({
+      severity: 'WARNING',
+      message: 'No groups exist in the database',
+      action: 'Create at least one group before assigning users'
+    });
+  }
+
+  if (diagnostics.groupUsersCount === 0 || diagnostics.groupUsersCount === '0') {
+    recommendations.push({
+      severity: 'INFO',
+      message: 'No users have been assigned to groups yet',
+      action: 'This is normal - assignments should happen when admin approves users'
+    });
+  }
+
+  const requiredColumns = {
+    users: ['user_id', 'full_name', 'email', 'role', 'status', 'created_at', 'headline'],
+    groups: ['group_id', 'group_name', 'start_date', 'end_date', 'created_by'],
+    group_users: ['group_id', 'user_id', 'assigned_at']
+  };
+
+  for (const [table, columns] of Object.entries(requiredColumns)) {
+    if (diagnostics[table]?.exists) {
+      const tableColumns = diagnostics[table].columnNames;
+      const missing = columns.filter(col => !tableColumns.includes(col));
+      if (missing.length > 0) {
+        recommendations.push({
+          severity: 'ERROR',
+          message: `Table '${table}' is missing columns: ${missing.join(', ')}`,
+          action: `Add these columns to the ${table} table`
+        });
+      }
+    }
+  }
+
+  return recommendations;
+}

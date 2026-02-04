@@ -9,7 +9,9 @@ import {
   getPendingUsers,
   getPendingCourses,
   updateUserStatus,
-  debugUserGroups
+  debugUserGroups,
+  diagnosticDatabaseSchema,
+  bulkAssignStudentsToGroup
 } from "../controllers/admin.controller.js";
 import { getAllUsers } from "../controllers/user.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -105,6 +107,24 @@ router.get(
   attachUser,
   roleGuard("admin"),
   debugUserGroups
+);
+
+// 🔍 DATABASE DIAGNOSTIC: Check database schema and structure
+router.get(
+  "/debug/database-schema",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  diagnosticDatabaseSchema
+);
+
+// ✅ HELPER: Bulk assign all active students to a group
+router.post(
+  "/bulk-assign-group/:groupId",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  bulkAssignStudentsToGroup
 );
 
 export default router;
