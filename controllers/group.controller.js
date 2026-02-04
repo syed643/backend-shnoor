@@ -175,12 +175,17 @@ export const getGroup = async (req, res) => {
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
       } else if (group.start_date && group.end_date) {
-        // Timestamp group
+        // Timestamp group: count users who either (a) were registered within the date window
+        // OR (b) are explicitly assigned in `group_users` (fallback/manual override).
         const userCountResult = await pool.query(
-          `SELECT COUNT(*)::int AS user_count
+          `SELECT COUNT(DISTINCT u.user_id)::int AS user_count
            FROM users u
-           WHERE u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = '')`,
-          [group.start_date, group.end_date]
+           LEFT JOIN group_users gu ON gu.user_id = u.user_id AND gu.group_id = $3
+           WHERE (
+             (u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = ''))
+             OR gu.group_id = $3
+           )`,
+          [group.start_date, group.end_date, group.group_id]
         );
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
@@ -264,17 +269,19 @@ export const getGroupUsers = async (req, res) => {
         );
         return res.status(200).json(result.rows);
       } else if (start_date && end_date) {
-        // Timestamp group
+        // Timestamp group: include both users whose created_at falls in the window
+        // and users explicitly present in `group_users` for this group.
         const result = await pool.query(
-          `SELECT
-             u.user_id,
-             u.full_name,
-             u.email,
-             u.created_at AS assigned_at
+          `SELECT DISTINCT u.user_id,
+                           u.full_name,
+                           u.email,
+                           COALESCE(gu.assigned_at, u.created_at) AS assigned_at
            FROM users u
-           WHERE u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = '')
-           ORDER BY u.created_at`,
-          [start_date, end_date]
+           LEFT JOIN group_users gu ON gu.user_id = u.user_id AND gu.group_id = $3
+           WHERE ((u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = ''))
+                  OR gu.group_id = $3)
+           ORDER BY assigned_at`,
+          [start_date, end_date, groupId]
         );
         return res.status(200).json(result.rows);
       } else if (start_date && !end_date) {
