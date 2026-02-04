@@ -236,46 +236,68 @@ export const approveUser = async (req, res) => {
     // 🚀 AUTO-ASSIGN USER TO APPROPRIATE GROUPS
     if (user.role === "student") {
       try {
-        // Get all timestamp-based groups (date-based cohorts)
+        console.log(`Starting group assignment for user ${userId}, created_at: ${user.created_at}`);
+
+        // Strategy 1: Timestamp-based groups (date-based cohorts)
+        // Find groups where registration date falls between start_date and end_date
         const timestampGroups = await pool.query(
-          `SELECT group_id FROM groups 
+          `SELECT group_id, group_name, start_date, end_date FROM groups 
            WHERE created_by IS NULL 
            AND start_date IS NOT NULL 
            AND end_date IS NOT NULL
-           AND $1 >= start_date 
-           AND $1 <= end_date`,
+           AND $1::timestamp >= start_date 
+           AND $1::timestamp <= end_date`,
           [user.created_at]
         );
 
+        console.log(`Found ${timestampGroups.rows.length} timestamp-based groups`, timestampGroups.rows);
+
         // Add student to matching timestamp groups
         for (const group of timestampGroups.rows) {
-          await pool.query(
-            `INSERT INTO group_users (group_id, user_id, assigned_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (group_id, user_id) DO NOTHING`,
-            [group.group_id, userId]
-          );
+          try {
+            const insertResult = await pool.query(
+              `INSERT INTO group_users (group_id, user_id, assigned_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (group_id, user_id) DO NOTHING
+               RETURNING group_id, user_id`,
+              [group.group_id, userId]
+            );
+            console.log(`✅ Added user ${userId} to timestamp group ${group.group_name}:`, insertResult.rows);
+          } catch (err) {
+            console.error(`Failed to add user to group ${group.group_id}:`, err);
+          }
         }
 
-        // If user has a college/headline, also add to college group
+        // Strategy 2: College/Headline based groups
+        // If user has college info, add to that college group
         if (user.headline && user.headline.trim() !== "") {
+          console.log(`Looking for college group matching headline: ${user.headline}`);
+          
           const collegeGroup = await pool.query(
-            `SELECT group_id FROM groups 
+            `SELECT group_id, group_name FROM groups 
              WHERE UPPER(group_name) = UPPER($1)`,
             [user.headline]
           );
 
+          console.log(`Found ${collegeGroup.rows.length} college groups`, collegeGroup.rows);
+
           if (collegeGroup.rows.length > 0) {
-            await pool.query(
-              `INSERT INTO group_users (group_id, user_id, assigned_at)
-               VALUES ($1, $2, NOW())
-               ON CONFLICT (group_id, user_id) DO NOTHING`,
-              [collegeGroup.rows[0].group_id, userId]
-            );
+            try {
+              const insertResult = await pool.query(
+                `INSERT INTO group_users (group_id, user_id, assigned_at)
+                 VALUES ($1, $2, NOW())
+                 ON CONFLICT (group_id, user_id) DO NOTHING
+                 RETURNING group_id, user_id`,
+                [collegeGroup.rows[0].group_id, userId]
+              );
+              console.log(`✅ Added user ${userId} to college group ${collegeGroup.rows[0].group_name}:`, insertResult.rows);
+            } catch (err) {
+              console.error(`Failed to add user to college group:`, err);
+            }
           }
         }
 
-        console.log(`✅ User ${userId} auto-assigned to matching groups`);
+        console.log(`✅ Group assignment completed for user ${userId}`);
       } catch (error) {
         console.error("Error auto-assigning user to groups:", error);
         // Don't fail the approval if group assignment fails
