@@ -195,7 +195,7 @@ export const approveUser = async (req, res) => {
     const { userId } = req.params;
 
     const result = await pool.query(
-      `SELECT role, status FROM users WHERE user_id = $1`,
+      `SELECT user_id, role, status, created_at, headline FROM users WHERE user_id = $1`,
       [userId],
     );
 
@@ -232,6 +232,55 @@ export const approveUser = async (req, res) => {
        RETURNING user_id, role, status`,
       [userId],
     );
+
+    // 🚀 AUTO-ASSIGN USER TO APPROPRIATE GROUPS
+    if (user.role === "student") {
+      try {
+        // Get all timestamp-based groups (date-based cohorts)
+        const timestampGroups = await pool.query(
+          `SELECT group_id FROM groups 
+           WHERE created_by IS NULL 
+           AND start_date IS NOT NULL 
+           AND end_date IS NOT NULL
+           AND $1 >= start_date 
+           AND $1 <= end_date`,
+          [user.created_at]
+        );
+
+        // Add student to matching timestamp groups
+        for (const group of timestampGroups.rows) {
+          await pool.query(
+            `INSERT INTO group_users (group_id, user_id, assigned_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (group_id, user_id) DO NOTHING`,
+            [group.group_id, userId]
+          );
+        }
+
+        // If user has a college/headline, also add to college group
+        if (user.headline && user.headline.trim() !== "") {
+          const collegeGroup = await pool.query(
+            `SELECT group_id FROM groups 
+             WHERE UPPER(group_name) = UPPER($1)`,
+            [user.headline]
+          );
+
+          if (collegeGroup.rows.length > 0) {
+            await pool.query(
+              `INSERT INTO group_users (group_id, user_id, assigned_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (group_id, user_id) DO NOTHING`,
+              [collegeGroup.rows[0].group_id, userId]
+            );
+          }
+        }
+
+        console.log(`✅ User ${userId} auto-assigned to matching groups`);
+      } catch (error) {
+        console.error("Error auto-assigning user to groups:", error);
+        // Don't fail the approval if group assignment fails
+      }
+    }
 
     res.json({
       message: "User approved successfully",
