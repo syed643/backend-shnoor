@@ -8,7 +8,8 @@ import {
   approveUser,
   getPendingUsers,
   getPendingCourses,
-  updateUserStatus
+  updateUserStatus,
+  debugUserGroups
 } from "../controllers/admin.controller.js";
 import { getAllUsers } from "../controllers/user.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -95,6 +96,15 @@ router.get(
   attachUser,
   roleGuard("admin"),
   getAllUsers
+);
+
+// 🔍 DEBUG ENDPOINT: Check group assignments for a user
+router.get(
+  "/debug/user/:userId/groups",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  debugUserGroups
 );
 
 export default router;

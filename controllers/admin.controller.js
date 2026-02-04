@@ -234,73 +234,97 @@ export const approveUser = async (req, res) => {
     );
 
     // 🚀 AUTO-ASSIGN USER TO APPROPRIATE GROUPS
+    let assignedGroups = [];
     if (user.role === "student") {
       try {
-        console.log(`Starting group assignment for user ${userId}, created_at: ${user.created_at}`);
+        console.log(`🔍 Starting group assignment for user ${userId}`);
+        console.log(`   Created at: ${user.created_at}, Headline: ${user.headline}`);
+
+        // Get ALL groups to debug
+        const allGroups = await pool.query(`SELECT group_id, group_name, start_date, end_date, created_by FROM groups`);
+        console.log(`📊 Total groups in database: ${allGroups.rows.length}`);
+        allGroups.rows.forEach(g => {
+          console.log(`   - Group: ${g.group_name}, ID: ${g.group_id}, Dates: ${g.start_date} to ${g.end_date}, created_by: ${g.created_by}`);
+        });
 
         // Strategy 1: Timestamp-based groups (date-based cohorts)
-        // Find groups where registration date falls between start_date and end_date
-        const timestampGroups = await pool.query(
-          `SELECT group_id, group_name, start_date, end_date FROM groups 
-           WHERE created_by IS NULL 
-           AND start_date IS NOT NULL 
-           AND end_date IS NOT NULL
-           AND $1::timestamp >= start_date 
-           AND $1::timestamp <= end_date`,
-          [user.created_at]
-        );
-
-        console.log(`Found ${timestampGroups.rows.length} timestamp-based groups`, timestampGroups.rows);
-
-        // Add student to matching timestamp groups
-        for (const group of timestampGroups.rows) {
+        if (user.created_at) {
           try {
-            const insertResult = await pool.query(
-              `INSERT INTO group_users (group_id, user_id, assigned_at)
-               VALUES ($1, $2, NOW())
-               ON CONFLICT (group_id, user_id) DO NOTHING
-               RETURNING group_id, user_id`,
-              [group.group_id, userId]
+            const timestampGroups = await pool.query(
+              `SELECT group_id, group_name FROM groups 
+               WHERE created_by IS NULL 
+               AND start_date IS NOT NULL 
+               AND end_date IS NOT NULL`
             );
-            console.log(`✅ Added user ${userId} to timestamp group ${group.group_name}:`, insertResult.rows);
+
+            console.log(`📅 Found ${timestampGroups.rows.length} potential timestamp groups`);
+
+            for (const group of timestampGroups.rows) {
+              // Check if user registration date falls within group date range
+              const checkGroup = await pool.query(
+                `SELECT group_id FROM groups 
+                 WHERE group_id = $1
+                 AND start_date <= $2::timestamp
+                 AND end_date >= $2::timestamp`,
+                [group.group_id, user.created_at]
+              );
+
+              if (checkGroup.rows.length > 0) {
+                console.log(`   ✅ User ${userId} matches group ${group.group_name}`);
+                try {
+                  await pool.query(
+                    `INSERT INTO group_users (group_id, user_id, assigned_at)
+                     VALUES ($1, $2, NOW())
+                     ON CONFLICT (group_id, user_id) DO NOTHING`,
+                    [group.group_id, userId]
+                  );
+                  assignedGroups.push(group.group_name);
+                  console.log(`   ✅ Successfully added user to ${group.group_name}`);
+                } catch (insertErr) {
+                  console.error(`   ❌ Error inserting into group_users:`, insertErr.message);
+                }
+              }
+            }
           } catch (err) {
-            console.error(`Failed to add user to group ${group.group_id}:`, err);
+            console.error(`   ❌ Error checking timestamp groups:`, err.message);
           }
         }
 
         // Strategy 2: College/Headline based groups
-        // If user has college info, add to that college group
         if (user.headline && user.headline.trim() !== "") {
-          console.log(`Looking for college group matching headline: ${user.headline}`);
-          
-          const collegeGroup = await pool.query(
-            `SELECT group_id, group_name FROM groups 
-             WHERE UPPER(group_name) = UPPER($1)`,
-            [user.headline]
-          );
+          console.log(`👤 Checking for college group: ${user.headline}`);
+          try {
+            const collegeGroup = await pool.query(
+              `SELECT group_id, group_name FROM groups 
+               WHERE UPPER(group_name) = UPPER($1)`,
+              [user.headline]
+            );
 
-          console.log(`Found ${collegeGroup.rows.length} college groups`, collegeGroup.rows);
-
-          if (collegeGroup.rows.length > 0) {
-            try {
-              const insertResult = await pool.query(
-                `INSERT INTO group_users (group_id, user_id, assigned_at)
-                 VALUES ($1, $2, NOW())
-                 ON CONFLICT (group_id, user_id) DO NOTHING
-                 RETURNING group_id, user_id`,
-                [collegeGroup.rows[0].group_id, userId]
-              );
-              console.log(`✅ Added user ${userId} to college group ${collegeGroup.rows[0].group_name}:`, insertResult.rows);
-            } catch (err) {
-              console.error(`Failed to add user to college group:`, err);
+            if (collegeGroup.rows.length > 0) {
+              console.log(`   ✅ Found college group: ${collegeGroup.rows[0].group_name}`);
+              try {
+                await pool.query(
+                  `INSERT INTO group_users (group_id, user_id, assigned_at)
+                   VALUES ($1, $2, NOW())
+                   ON CONFLICT (group_id, user_id) DO NOTHING`,
+                  [collegeGroup.rows[0].group_id, userId]
+                );
+                assignedGroups.push(collegeGroup.rows[0].group_name);
+                console.log(`   ✅ Successfully added user to college group`);
+              } catch (insertErr) {
+                console.error(`   ❌ Error inserting into college group:`, insertErr.message);
+              }
+            } else {
+              console.log(`   ⚠️  No college group found for: ${user.headline}`);
             }
+          } catch (err) {
+            console.error(`   ❌ Error checking college group:`, err.message);
           }
         }
 
-        console.log(`✅ Group assignment completed for user ${userId}`);
+        console.log(`✅ Group assignment completed. Assigned to: ${assignedGroups.length ? assignedGroups.join(', ') : 'no groups'}`);
       } catch (error) {
-        console.error("Error auto-assigning user to groups:", error);
-        // Don't fail the approval if group assignment fails
+        console.error("❌ Error auto-assigning user to groups:", error.message);
       }
     }
 
@@ -370,5 +394,75 @@ export const updateUserStatus = async (req, res) => {
   } catch (err) {
     console.error("updateUserStatus error:", err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+// 🔍 DEBUG ENDPOINT: Check what groups a user should be assigned to
+export const debugUserGroups = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get user info
+    const userResult = await pool.query(
+      `SELECT user_id, full_name, created_at, headline FROM users WHERE user_id = $1`,
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    // Get all groups
+    const allGroups = await pool.query(
+      `SELECT group_id, group_name, start_date, end_date, created_by FROM groups`
+    );
+
+    // Check timestamp groups
+    const timestampMatches = [];
+    for (const group of allGroups.rows) {
+      if (group.created_by === null && group.start_date && group.end_date) {
+        const isMatch = user.created_at >= group.start_date && user.created_at <= group.end_date;
+        timestampMatches.push({
+          group_id: group.group_id,
+          group_name: group.group_name,
+          user_created_at: user.created_at,
+          group_start_date: group.start_date,
+          group_end_date: group.end_date,
+          isMatch: isMatch
+        });
+      }
+    }
+
+    // Check college groups
+    let collegeMatch = null;
+    if (user.headline) {
+      const collegeGroups = await pool.query(
+        `SELECT group_id, group_name FROM groups WHERE UPPER(group_name) = UPPER($1)`,
+        [user.headline]
+      );
+      if (collegeGroups.rows.length > 0) {
+        collegeMatch = collegeGroups.rows[0];
+      }
+    }
+
+    // Get current group assignments
+    const currentGroups = await pool.query(
+      `SELECT gu.group_id, g.group_name FROM group_users gu 
+       JOIN groups g ON gu.group_id = g.group_id 
+       WHERE gu.user_id = $1`,
+      [userId]
+    );
+
+    res.json({
+      user: user,
+      timestampGroupMatches: timestampMatches,
+      collegeMatch: collegeMatch,
+      currentAssignments: currentGroups.rows,
+      allGroups: allGroups.rows
+    });
+  } catch (error) {
+    console.error("debugUserGroups error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
