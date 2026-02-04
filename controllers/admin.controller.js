@@ -282,49 +282,16 @@ export const approveUser = async (req, res) => {
           }
         }
 
-        // Strategy 2: College/Headline based groups
-        // If user has a headline/college, add to matching college group
-        if (user.headline && user.headline.trim() !== "") {
-          console.log(`👤 Checking for college group matching headline: "${user.headline}"`);
-          try {
-            const collegeGroup = await pool.query(
-              `SELECT group_id, group_name FROM groups 
-               WHERE UPPER(group_name) = UPPER($1)`,
-              [user.headline]
-            );
-
-            if (collegeGroup.rows.length > 0) {
-              console.log(`   ✅ Found college group: ${collegeGroup.rows[0].group_name}`);
-              try {
-                await pool.query(
-                  `INSERT INTO group_users (group_id, user_id, assigned_at)
-                   VALUES ($1, $2, NOW())
-                   ON CONFLICT (group_id, user_id) DO NOTHING`,
-                  [collegeGroup.rows[0].group_id, userId]
-                );
-                assignedGroups.push(collegeGroup.rows[0].group_name);
-                console.log(`   ✅ Added to college group: ${collegeGroup.rows[0].group_name}`);
-              } catch (insertErr) {
-                console.error(`   ❌ Failed to add to college group:`, insertErr.message);
-              }
-            } else {
-              console.log(`   ⚠️  No college group found for headline: "${user.headline}"`);
-            }
-          } catch (err) {
-            console.error(`   ❌ Error checking college group:`, err.message);
-          }
-        } else {
-          console.log(`⚠️  User has no headline/college info`);
-          
-          // Strategy 3: If no groups match date ranges and no college, try assigning to ANY group without dates
-          console.log(`🔄 Trying fallback: assigning to groups without date restrictions...`);
+        // If timestamp-based assignments found none, run fallback assignment
+        if (assignedGroups.length === 0) {
+          console.log(`🔄 No timestamp groups matched; trying fallback: assign to manual or most-recent group...`);
           try {
             const anyGroup = await pool.query(
               `SELECT group_id, group_name FROM groups 
-               WHERE (start_date IS NULL OR end_date IS NULL)
+               WHERE start_date IS NULL OR end_date IS NULL
                LIMIT 1`
             );
-            
+
             if (anyGroup.rows.length > 0) {
               console.log(`   💡 Found manual group: ${anyGroup.rows[0].group_name}`);
               try {
@@ -340,12 +307,40 @@ export const approveUser = async (req, res) => {
                 console.error(`   ❌ Failed to add to fallback group:`, insertErr.message);
               }
             } else {
-              console.log(`   ⚠️  No groups available (manual or date-based)`);
+              console.log(`   ⚠️  No manual groups available (no null-date groups found)`);
+              // As an additional fallback, pick the most-recent group (by start_date or creation)
+              try {
+                const recentGroup = await pool.query(
+                  `SELECT group_id, group_name, start_date, end_date FROM groups
+                   ORDER BY start_date DESC NULLS LAST, group_id DESC
+                   LIMIT 1`
+                );
+
+                if (recentGroup.rows.length > 0) {
+                  const rg = recentGroup.rows[0];
+                  console.log(`   🔎 Found recent group as final fallback: ${rg.group_name} (start=${rg.start_date}, end=${rg.end_date})`);
+                  try {
+                    await pool.query(
+                      `INSERT INTO group_users (group_id, user_id, assigned_at)
+                       VALUES ($1, $2, NOW())
+                       ON CONFLICT (group_id, user_id) DO NOTHING`,
+                      [rg.group_id, userId]
+                    );
+                    assignedGroups.push(rg.group_name);
+                    console.log(`   ✅ Added to recent fallback group: ${rg.group_name}`);
+                  } catch (insErr) {
+                    console.error(`   ❌ Failed to add to recent fallback group:`, insErr.message);
+                  }
+                } else {
+                  console.log(`   ⚠️  No groups exist in DB at all.`);
+                }
+              } catch (err) {
+                console.error(`   ❌ Error checking recent groups:`, err.message);
+              }
             }
           } catch (err) {
             console.error(`   ❌ Error checking fallback groups:`, err.message);
           }
-
         }
 
         console.log(`✅ Group assignment completed. Total groups assigned: ${assignedGroups.length}`);
@@ -463,17 +458,8 @@ export const debugUserGroups = async (req, res) => {
       }
     }
 
-    // Check college groups
+    // College/headline matching disabled — handled by fallback only
     let collegeMatch = null;
-    if (user.headline) {
-      const collegeGroups = await pool.query(
-        `SELECT group_id, group_name FROM groups WHERE UPPER(group_name) = UPPER($1)`,
-        [user.headline]
-      );
-      if (collegeGroups.rows.length > 0) {
-        collegeMatch = collegeGroups.rows[0];
-      }
-    }
 
     // Get current group assignments
     const currentGroups = await pool.query(
