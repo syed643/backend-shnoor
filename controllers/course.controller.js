@@ -1,22 +1,24 @@
 import pool from "../db/postgres.js";
 
 export const addCourse = async (req, res) => {
-  const {
+  const values = [
+    instructor_id,
     title,
     description,
     category,
-    thumbnail_url,
-    difficulty,
-    status,
-    validity_value,
-    validity_unit,
-    schedule_start_at,
-    price_type,
-    price_amount,
-    prereq_description,
-    prereq_video_urls, 
-    prereq_pdf_url,
-  } = req.body;
+    thumbnail_url || null,
+    difficulty || null,
+    status || "draft",
+    validity_value || null,
+    validity_unit || null,
+    expiresAt,
+    schedule_start_at || null,
+    price_type || "free",
+    price_type === "paid" ? price_amount : null,
+    prereq_description || null,
+    prereq_video_urls || [], // ✅ FIXED
+    prereq_pdf_url || null,
+  ];
 
   const instructor_id = req.user.id;
 
@@ -64,21 +66,21 @@ export const addCourse = async (req, res) => {
     `;
 
     const values = [
-      instructor_id,                         // $1
-      title,                                 // $2
-      description,                           // $3
-      category,                              // $4
-      thumbnail_url || null,                 // $5
-      difficulty || null,                    // $6
+      instructor_id, // $1
+      title, // $2
+      description, // $3
+      category, // $4
+      thumbnail_url || null, // $5
+      difficulty || null, // $6
       status === "pending" ? "pending" : "draft", // $7
-      validity_value || null,                // $8
-      validity_unit || null,                 // $9
-      expiresAt,                             // $10 ✅ SIMPLE TIMESTAMP
-      schedule_start_at || null,             // $11
-      price_type,                  // $12
+      validity_value || null, // $8
+      validity_unit || null, // $9
+      expiresAt, // $10 ✅ SIMPLE TIMESTAMP
+      schedule_start_at || null, // $11
+      price_type, // $12
       price_type === "paid" ? price_amount : null, // $13
-       prereq_description || null,
-      prereq_video_urls ? JSON.stringify(prereq_video_urls) : '[]', 
+      prereq_description || null,
+      prereq_video_urls ? JSON.stringify(prereq_video_urls) : "[]",
       prereq_pdf_url || null,
     ];
 
