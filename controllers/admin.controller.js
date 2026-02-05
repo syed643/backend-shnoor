@@ -156,8 +156,6 @@ export const assignCourses = async (req, res) => {
               );
             }
           }
-        } else {
-          console.warn(`assignCourses: student not found for id ${studentId}`);
         }
       } catch (notifError) {
         console.error(
