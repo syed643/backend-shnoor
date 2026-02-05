@@ -306,6 +306,9 @@ export const getCourseById = async (req, res) => {
         c.category,
         c.difficulty AS level,        -- 👈 FIX LEVEL
         c.created_at AS updatedAt, 
+         c.prereq_description,
+        c.prereq_video_urls,
+        c.prereq_pdf_url,
 
         json_build_object(            -- 👈 FIX INSTRUCTOR
           'name', u.full_name,
