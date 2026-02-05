@@ -50,28 +50,23 @@ import { sendPushNotification } from "./pushService.js";
 
 // Emit notification to a specific user
 export const emitNotificationToUser = (userId, notification) => {
-  if (!io) {
+  if (!global.io) {
     console.error("Socket.IO not initialized");
     return;
   }
 
-  // 1. Emit Socket Event
-  io.to(userId).emit("notification", {
+  global.io.to(`user_${userId}`).emit("new_notification", {
     ...notification,
     timestamp: new Date().toISOString(),
   });
 
   console.log(`📤 Notification sent to user ${userId}:`, notification.message);
-
-  // 2. Send Web Push
-  sendPushNotification(userId, notification).catch(err =>
-    console.error("❌ Failed to send push from socket service:", err)
-  );
 };
+
 
 // Emit notification to multiple users
 export const emitNotificationToUsers = (userIds, notification) => {
-  if (!io) {
+  if (!global.io) {
     console.error("Socket.IO not initialized");
     return;
   }

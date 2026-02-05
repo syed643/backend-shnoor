@@ -35,6 +35,7 @@ const io = new Server(server, {
     credentials: true,
   },
 });
+global.io = io;
 app.use(
   cors({
     origin: function (origin, callback) {
