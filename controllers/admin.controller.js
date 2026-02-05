@@ -1,6 +1,5 @@
 import pool from "../db/postgres.js";
 import { emitNotificationToUser } from "../services/socket.js";
-import { sendInstructorInvite } from "../services/email.js";
 
 export const getDashboardStats = async (req, res) => {
   try {
