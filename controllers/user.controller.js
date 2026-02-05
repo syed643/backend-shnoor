@@ -1,6 +1,7 @@
 import admin from "../services/firebaseAdmin.js";
 import pool from "../db/postgres.js";
 import { sendInstructorInvite } from "../services/email.service.js";
+const baseUrl = process.env.BACKEND_URL;
 
 export const getMyProfile = async (req, res) => {
   try {
@@ -149,3 +150,27 @@ export const updateMyProfile = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+export const uploadProfilePicture = async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded" });
+  }
+
+  const fileUrl = `${baseUrl}/uploads/profile_pictures/${req.file.filename}`;
+
+  try {
+    await pool.query(
+      "UPDATE users SET photo_url = $1 WHERE user_id = $2",
+      [fileUrl, req.user.id]
+    );
+
+    res.status(200).json({
+      message: "Image uploaded and profile updated successfully",
+      url: fileUrl,
+    });
+  } catch (error) {
+    console.error("uploadProfilePicture error:", error);
+    res.status(500).json({ message: "Failed to save to database" });
+  }
+};
+

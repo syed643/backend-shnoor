@@ -13,6 +13,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import studentCoursesRoutes from "./routes/studentCourses.routes.js";
 import examRoutes from "./routes/exam.routes.js";
 import studentExamRoutes from "./routes/studentExam.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import groupsRoutes from "./routes/group.routes.js";
 import practiceRoutes from "./routes/practice.routes.js";
@@ -62,6 +63,7 @@ app.use("/api/student/exams", studentExamRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/practice", practiceRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/upload", uploadRoutes);
 
 
 app.get("/", (req, res) => {
