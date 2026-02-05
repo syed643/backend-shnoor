@@ -1,4 +1,5 @@
 import pool from "../db/postgres.js";
+import { emitNotificationToUser } from "../services/socket.js";
 
 
 export const assignCourseToStudent = async (req, res) => {
@@ -52,6 +53,33 @@ export const assignCourseToStudent = async (req, res) => {
        VALUES ($1, $2)`,
       [course_id, student_id]
     );
+        // Notify Student
+    const courseTitle = courseResult.rows[0]?.title || "a new course";
+    await pool.query(
+      `INSERT INTO notifications (user_id, message, link) VALUES ($1, $2, $3)`,
+      [
+        student_id,
+        `New course assigned: ${courseTitle}. Enroll now.`,
+        `/student/course/${course_id}`,
+      ]
+    );
+
+    // [NEW] Trigger Real-time + Web Push
+    try {
+      // Need to fetch the notification ID just created to be precise, or just send payload
+      // Ideally we should RETURNING * from the INSERT above.
+      // For now, let's construct a payload. The ID might be missing but message/link are key.
+      emitNotificationToUser(student_id, {
+        id: Date.now(), // Temporary ID if we don't fetch it
+        message: `New course assigned: ${courseTitle}`,
+        link: `/student/course/${course_id}`,
+        type: "COURSE_ASSIGNED",
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+    } catch (socketErr) {
+      console.error("Socket emit failed:", socketErr);
+    }
 
     res.status(201).json({
       message: "Course assigned to student successfully",

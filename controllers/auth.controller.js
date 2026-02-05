@@ -96,6 +96,10 @@ export const login = async (req, res) => {
     }
 
     // ✅ Login allowed
+      await pool.query(
+      `UPDATE users SET last_login = NOW() WHERE user_id = $1`,
+      [user.user_id]
+    );
     return res.status(200).json({
       message: "Login successful",
       user,

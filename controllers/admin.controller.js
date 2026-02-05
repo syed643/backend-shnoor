@@ -1,4 +1,6 @@
 import pool from "../db/postgres.js";
+import { emitNotificationToUser } from "../services/socket.js";
+
 
 export const getDashboardStats = async (req, res) => {
   try {
@@ -38,7 +40,7 @@ ORDER BY created_at DESC;
   }
 };
 
-export const assignCourses = async (req, res) => {
+{/*export const assignCourses = async (req, res) => {
   const { studentIds, courseIds } = req.body;
 
   if (!studentIds?.length || !courseIds?.length) {
@@ -67,6 +69,111 @@ export const assignCourses = async (req, res) => {
     `;
 
     await pool.query(query, values);
+
+    res.status(200).json({
+      message: "Courses assigned successfully",
+    });
+  } catch (error) {
+    console.error("Assign courses error:", error);
+    res.status(500).json({ message: "Failed to assign courses" });
+  }
+};*/}
+
+export const assignCourses = async (req, res) => {
+  const { studentIds, courseIds } = req.body;
+
+  if (!studentIds?.length || !courseIds?.length) {
+    return res.status(400).json({
+      message: "studentIds and courseIds are required",
+    });
+  }
+
+  try {
+    // Assign courses
+    const query = `
+      INSERT INTO course_assignments (student_id, course_id)
+      SELECT s_id, c_id
+      FROM UNNEST($1::uuid[]) AS s_id
+      CROSS JOIN UNNEST($2::uuid[]) AS c_id
+      ON CONFLICT DO NOTHING;
+    `;
+
+    await pool.query(query, [studentIds, courseIds]);
+
+    // Fetch course titles once for notifications
+    const coursesRes = await pool.query(
+      `SELECT courses_id, title FROM courses WHERE courses_id = ANY($1::uuid[])`,
+      [courseIds]
+    );
+    const courseTitleById = new Map(
+      coursesRes.rows.map((c) => [c.courses_id, c.title])
+    );
+
+    // Create notifications and send emails to students
+    console.log("Starting notification creation for students:", studentIds);
+
+    for (const studentId of studentIds) {
+      try {
+        // Fetch student email and name from database
+        const studentResult = await pool.query(
+          `SELECT email, full_name FROM users WHERE user_id = $1`,
+          [studentId]
+        );
+
+        if (studentResult.rows.length > 0) {
+          const { email, full_name } = studentResult.rows[0];
+
+          // Create notification and log the inserted row
+          for (const courseId of courseIds) {
+            try {
+              const courseTitle = courseTitleById.get(courseId) || "a new course";
+              const message = `🎓 New course assigned: ${courseTitle}. Enroll now.`;
+
+              const notifRes = await pool.query(
+                `INSERT INTO notifications (user_id, message, link)
+                 VALUES ($1, $2, $3)
+                 RETURNING *`,
+                [studentId, message, `/student/course/${courseId}`]
+              );
+              console.log(
+                `Notification created for student ${studentId} (course ${courseId}):`,
+                notifRes.rows[0]
+              );
+
+              // 🚀 EMIT REAL-TIME SOCKET NOTIFICATION
+              emitNotificationToUser(studentId, {
+                id: notifRes.rows[0].id,
+                message: message,
+                link: `/student/course/${courseId}`,
+                type: "COURSE_ASSIGNED",
+                is_read: false,
+                created_at: notifRes.rows[0].created_at,
+              });
+            } catch (insertErr) {
+              console.error(
+                `Failed to insert notification for ${studentId} (course ${courseId}):`,
+                insertErr
+              );
+            }
+          }
+
+          // Send email to student (non-blocking)
+          try {
+            await sendInstructorInvite(email, full_name);
+            console.log(`Email sent to student ${studentId} (${email})`);
+          } catch (mailError) {
+            console.error(`Failed to send email to ${email}:`, mailError);
+          }
+        } else {
+          console.warn(`assignCourses: student not found for id ${studentId}`);
+        }
+      } catch (notifError) {
+        console.error(
+          `Failed to process student ${studentId}:`,
+          notifError
+        );
+      }
+    }
 
     res.status(200).json({
       message: "Courses assigned successfully",
@@ -120,6 +227,20 @@ export const updateCourseStatus = async (req, res) => {
     res.status(500).json({
       message: "Failed to update course status",
     });
+  }
+};
+
+export const getNotificationsForUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const result = await pool.query(
+      `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
+      [userId]
+    );
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('getNotificationsForUser error:', error);
+    res.status(500).json({ message: 'Failed to fetch notifications for user' });
   }
 };
 

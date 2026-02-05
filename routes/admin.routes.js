@@ -11,7 +11,8 @@ import {
   updateUserStatus,
   debugUserGroups,
   diagnosticDatabaseSchema,
-  bulkAssignStudentsToGroup
+  bulkAssignStudentsToGroup,
+  getNotificationsForUser
 } from "../controllers/admin.controller.js";
 import { getAllUsers } from "../controllers/user.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -50,6 +51,14 @@ router.get(
   attachUser,
   roleGuard("admin"),
   getCoursesByStatus
+);
+
+router.get(
+  "/notifications/:userId",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  getNotificationsForUser
 );
 
 router.get(
