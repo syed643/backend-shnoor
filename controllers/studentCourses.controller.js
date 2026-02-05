@@ -23,7 +23,10 @@ export const getStudentCourseById = async (req, res) => {
          courses_id AS id,
          title,
          description,
-         difficulty
+         difficulty,
+         prereq_description,
+         prereq_video_urls,
+         prereq_pdf_url
        FROM courses
        WHERE courses_id = $1 AND status = 'approved'`,
       [courseId],

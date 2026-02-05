@@ -13,6 +13,9 @@ export const addCourse = async (req, res) => {
     schedule_start_at,
     price_type,
     price_amount,
+    prereq_description,
+    prereq_video_urls, 
+    prereq_pdf_url,
   } = req.body;
 
   const instructor_id = req.user.id;
@@ -49,10 +52,13 @@ export const addCourse = async (req, res) => {
         expires_at,
         schedule_start_at,
         price_type,
-        price_amount
+        price_amount,
+        prereq_description,
+        prereq_video_urls,
+        prereq_pdf_url
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
       )
       RETURNING *
     `;
@@ -71,6 +77,9 @@ export const addCourse = async (req, res) => {
       schedule_start_at || null,             // $11
       price_type,                  // $12
       price_type === "paid" ? price_amount : null, // $13
+       prereq_description || null,
+      prereq_video_urls ? JSON.stringify(prereq_video_urls) : '[]', 
+      prereq_pdf_url || null,
     ];
 
     const result = await pool.query(query, values);
