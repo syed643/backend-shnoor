@@ -1,6 +1,6 @@
 import pool from "../db/postgres.js";
 import { emitNotificationToUser } from "../services/socket.js";
-
+import { sendInstructorInvite } from "../services/email.js";
 
 export const getDashboardStats = async (req, res) => {
   try {
@@ -155,14 +155,6 @@ export const assignCourses = async (req, res) => {
                 insertErr
               );
             }
-          }
-
-          // Send email to student (non-blocking)
-          try {
-            await sendInstructorInvite(email, full_name);
-            console.log(`Email sent to student ${studentId} (${email})`);
-          } catch (mailError) {
-            console.error(`Failed to send email to ${email}:`, mailError);
           }
         } else {
           console.warn(`assignCourses: student not found for id ${studentId}`);
