@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import pool from "./db/postgres.js";
+import { initializeSocket } from "./services/socket.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
@@ -15,6 +16,7 @@ import studentExamRoutes from "./routes/studentExam.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import groupsRoutes from "./routes/group.routes.js";
 import practiceRoutes from "./routes/practice.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 import http from "http";
 import { Server } from "socket.io";
 import { initChatTables, serveFile } from "./controllers/chat.controller.js";
@@ -59,6 +61,8 @@ app.use("/api/exams", examRoutes);
 app.use("/api/student/exams", studentExamRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/practice", practiceRoutes);
+app.use("/api/notifications", notificationRoutes);
+
 
 app.get("/", (req, res) => {
   res.send("API is running 🚀");
