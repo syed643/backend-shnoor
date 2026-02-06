@@ -22,7 +22,7 @@ import http from "http";
 import { Server } from "socket.io";
 import { initChatTables, serveFile } from "./controllers/chat.controller.js";
 import botRoutes from "./routes/bot.routes.js";
-
+import reviewroutes from "./routes/reviews.routes.js"
 const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
@@ -67,6 +67,7 @@ app.use("/api/practice", practiceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/bot", botRoutes); // For bot media uploads
+app.use("/api/reviews",reviewroutes) // For instructor reviews
 
 
 app.get("/", (req, res) => {
