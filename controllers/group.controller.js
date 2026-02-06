@@ -10,12 +10,10 @@ export const createGroup = async (req, res) => {
   // For timestamp groups, require dates
   if (start_date || end_date) {
     if (!start_date || !end_date) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Both start date and end date are required for timestamp groups",
-        });
+      return res.status(400).json({
+        message:
+          "Both start date and end date are required for timestamp groups",
+      });
     }
     if (new Date(start_date) >= new Date(end_date)) {
       return res
@@ -84,9 +82,14 @@ export const getGroups = async (req, res) => {
                    AND u.status = 'active'
                    AND (u.headline IS NULL OR u.headline = '')
                )
-               -- College manual groups (admin-created, date-open)
+         -- College manual groups (admin-created, date-open, active students only)
                WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NULL THEN (
-                 SELECT COUNT(*)::int FROM group_users gu WHERE gu.group_id = g.group_id
+                 SELECT COUNT(*)::int 
+                 FROM group_users gu 
+                 JOIN users u ON gu.user_id = u.user_id
+                 WHERE gu.group_id = g.group_id
+                   AND u.status = 'active'
+                   AND u.role = 'student'
                )
                -- Automatic college groups from groups table
                ELSE (
@@ -94,6 +97,7 @@ export const getGroups = async (req, res) => {
                  FROM users u
                  WHERE UPPER(u.headline) = UPPER(g.group_name)
                    AND u.role = 'student'
+                  AND u.status = 'active'
                )
              END AS user_count
       FROM groups g
@@ -124,6 +128,7 @@ export const getGroups = async (req, res) => {
                    FROM users u
                    WHERE UPPER(u.headline) = UPPER(g.group_name)
                      AND u.role = 'student'
+                      AND u.status = 'active'
                  )
                END AS user_count
         FROM groups g
@@ -139,6 +144,7 @@ export const getGroups = async (req, res) => {
                  FROM users u
                  WHERE UPPER(TRIM(u.headline)) = UPPER(TRIM(cg.group_name))
                    AND u.role = 'student'
+                    AND u.status = 'active'
                ) AS user_count
         FROM college_groups cg
         ORDER BY created_at DESC`;
@@ -195,7 +201,7 @@ export const getGroup = async (req, res) => {
            FROM users u
            LEFT JOIN group_users gu ON gu.user_id = u.user_id AND gu.group_id = $3
            WHERE (
-             (u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = ''))
+             (u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND u.status = 'active' AND (u.headline IS NULL OR u.headline = ''))
              OR gu.group_id = $3
            )`,
           [group.start_date, group.end_date, group.group_id],
@@ -215,7 +221,7 @@ export const getGroup = async (req, res) => {
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count
            FROM users u
-           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student'`,
+           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student' AND u.status = 'active'`,
           [group.group_name],
         );
         group.user_count = userCountResult.rows[0].user_count;
@@ -239,7 +245,7 @@ export const getGroup = async (req, res) => {
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count
            FROM users u
-           WHERE u.headline = $1 AND u.role = 'student'`,
+           WHERE u.headline = $1 AND u.role = 'student' AND u.status = 'active'`,
           [group.group_name],
         );
         group.user_count = userCountResult.rows[0].user_count;
@@ -294,7 +300,7 @@ export const getGroupUsers = async (req, res) => {
                            COALESCE(gu.assigned_at, u.created_at) AS assigned_at
            FROM users u
            LEFT JOIN group_users gu ON gu.user_id = u.user_id AND gu.group_id = $3
-           WHERE ((u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = ''))
+           WHERE ((u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = '') AND u.status = 'active')
                   OR gu.group_id = $3)
            ORDER BY assigned_at`,
           [start_date, end_date, groupId],
@@ -327,7 +333,7 @@ export const getGroupUsers = async (req, res) => {
              u.email,
              u.created_at AS assigned_at
            FROM users u
-           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student'
+           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student' AND u.status = 'active'
            ORDER BY u.created_at`,
           [collegeName],
         );
@@ -351,7 +357,7 @@ export const getGroupUsers = async (req, res) => {
                u.email,
                u.created_at AS assigned_at
              FROM users u
-             WHERE u.headline = $1 AND u.role = 'student'
+             WHERE u.headline = $1 AND u.role = 'student' AND u.status = 'active'
              ORDER BY u.created_at`,
             [collegeName],
           );
@@ -400,11 +406,9 @@ export const addUserToGroup = async (req, res) => {
           [groupName, userId],
         );
         if (updateResult.rowCount === 0) {
-          return res
-            .status(400)
-            .json({
-              message: "Only active students can be added to college groups",
-            });
+          return res.status(400).json({
+            message: "Only active students can be added to college groups",
+          });
         }
         return res
           .status(200)
@@ -436,11 +440,9 @@ export const addUserToGroup = async (req, res) => {
 
     if (groupStartDate && groupEndDate) {
       // Timestamp group, cannot manually add
-      return res
-        .status(400)
-        .json({
-          message: "Cannot manually add students to timestamp-based groups",
-        });
+      return res.status(400).json({
+        message: "Cannot manually add students to timestamp-based groups",
+      });
     }
 
     // College automatic group from groups table
@@ -452,11 +454,9 @@ export const addUserToGroup = async (req, res) => {
       [groupName, userId],
     );
     if (updateResult.rowCount === 0) {
-      return res
-        .status(400)
-        .json({
-          message: "Only active students can be added to college groups",
-        });
+      return res.status(400).json({
+        message: "Only active students can be added to college groups",
+      });
     }
     return res.status(200).json({ message: "Student added to college group" });
   } catch (error) {
@@ -487,7 +487,7 @@ export const removeUserFromGroup = async (req, res) => {
         }
         // It's college group from view
         await pool.query(
-          `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`,
+          `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student' AND status = 'active'`,
           [userId],
         );
         return res
@@ -513,17 +513,14 @@ export const removeUserFromGroup = async (req, res) => {
 
     if (start_date && end_date) {
       // Timestamp group, cannot manually remove
-      return res
-        .status(400)
-        .json({
-          message:
-            "Cannot manually remove students from timestamp-based groups",
-        });
+      return res.status(400).json({
+        message: "Cannot manually remove students from timestamp-based groups",
+      });
     }
 
     // College automatic group from groups table
     await pool.query(
-      `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`,
+      `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student' AND status = 'active'`,
       [userId],
     );
     return res
@@ -691,7 +688,7 @@ export const deleteGroup = async (req, res) => {
         `UPDATE users
          SET headline = NULL
          WHERE headline = $1
-           AND role = 'student'`,
+           AND role = 'student' AND status = 'active'`,
         [collegeName],
       );
 
