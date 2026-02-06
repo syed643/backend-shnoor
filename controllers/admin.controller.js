@@ -28,7 +28,7 @@ export const getAllStudents = async (req, res) => {
     const result = await pool.query(
       `SELECT user_id, full_name AS name, email
 FROM users
-WHERE role IN ('student', 'user')
+WHERE role IN ('student', 'user') AND status = 'active'
 ORDER BY created_at DESC;
 `,
     );
@@ -39,7 +39,8 @@ ORDER BY created_at DESC;
   }
 };
 
-{/*export const assignCourses = async (req, res) => {
+{
+  /*export const assignCourses = async (req, res) => {
   const { studentIds, courseIds } = req.body;
 
   if (!studentIds?.length || !courseIds?.length) {
@@ -76,7 +77,8 @@ ORDER BY created_at DESC;
     console.error("Assign courses error:", error);
     res.status(500).json({ message: "Failed to assign courses" });
   }
-};*/}
+};*/
+}
 
 export const assignCourses = async (req, res) => {
   const { studentIds = [], groupIds = [], courseIds } = req.body;
@@ -105,10 +107,12 @@ export const assignCourses = async (req, res) => {
          WHERE gu.group_id = ANY($1::uuid[])
            AND u.role = 'student'
            AND u.status = 'active'`,
-        [groupIds]
+        [groupIds],
       );
 
-      const groupStudentIds = groupStudentsResult.rows.map(row => row.user_id);
+      const groupStudentIds = groupStudentsResult.rows.map(
+        (row) => row.user_id,
+      );
       allStudentIds = [...new Set([...allStudentIds, ...groupStudentIds])]; // Remove duplicates
     }
 
@@ -132,10 +136,10 @@ export const assignCourses = async (req, res) => {
     // 3️⃣ Fetch course titles once for notifications
     const coursesRes = await pool.query(
       `SELECT courses_id, title FROM courses WHERE courses_id = ANY($1::uuid[])`,
-      [courseIds]
+      [courseIds],
     );
     const courseTitleById = new Map(
-      coursesRes.rows.map((c) => [c.courses_id, c.title])
+      coursesRes.rows.map((c) => [c.courses_id, c.title]),
     );
 
     // 4️⃣ Create notifications and send emails to all students
@@ -146,7 +150,7 @@ export const assignCourses = async (req, res) => {
         // Fetch student email and name from database
         const studentResult = await pool.query(
           `SELECT email, full_name FROM users WHERE user_id = $1`,
-          [studentId]
+          [studentId],
         );
 
         if (studentResult.rows.length > 0) {
@@ -155,18 +159,19 @@ export const assignCourses = async (req, res) => {
           // Create notification and log the inserted row
           for (const courseId of courseIds) {
             try {
-              const courseTitle = courseTitleById.get(courseId) || "a new course";
+              const courseTitle =
+                courseTitleById.get(courseId) || "a new course";
               const message = `🎓 New course assigned: ${courseTitle}. Enroll now.`;
 
               const notifRes = await pool.query(
                 `INSERT INTO notifications (user_id, message, link)
                  VALUES ($1, $2, $3)
                  RETURNING *`,
-                [studentId, message, `/student/course/${courseId}`]
+                [studentId, message, `/student/course/${courseId}`],
               );
               console.log(
                 `Notification created for student ${studentId} (course ${courseId}):`,
-                notifRes.rows[0]
+                notifRes.rows[0],
               );
 
               // 🚀 EMIT REAL-TIME SOCKET NOTIFICATION
@@ -181,16 +186,13 @@ export const assignCourses = async (req, res) => {
             } catch (insertErr) {
               console.error(
                 `Failed to insert notification for ${studentId} (course ${courseId}):`,
-                insertErr
+                insertErr,
               );
             }
           }
         }
       } catch (notifError) {
-        console.error(
-          `Failed to process student ${studentId}:`,
-          notifError
-        );
+        console.error(`Failed to process student ${studentId}:`, notifError);
       }
     }
 
@@ -255,12 +257,12 @@ export const getNotificationsForUser = async (req, res) => {
     const { userId } = req.params;
     const result = await pool.query(
       `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
-      [userId]
+      [userId],
     );
     res.status(200).json(result.rows);
   } catch (error) {
-    console.error('getNotificationsForUser error:', error);
-    res.status(500).json({ message: 'Failed to fetch notifications for user' });
+    console.error("getNotificationsForUser error:", error);
+    res.status(500).json({ message: "Failed to fetch notifications for user" });
   }
 };
 
@@ -379,13 +381,19 @@ export const approveUser = async (req, res) => {
     if (user.role === "student") {
       try {
         console.log(`🔍 Starting group assignment for user ${userId}`);
-        console.log(`   User Info: ${user.full_name}, Created at: ${user.created_at}, Headline: ${user.headline}`);
+        console.log(
+          `   User Info: ${user.full_name}, Created at: ${user.created_at}, Headline: ${user.headline}`,
+        );
 
         // Get all groups for debugging
-        const allGroups = await pool.query(`SELECT group_id, group_name, start_date, end_date FROM groups`);
+        const allGroups = await pool.query(
+          `SELECT group_id, group_name, start_date, end_date FROM groups`,
+        );
         console.log(`📊 Total groups in DB: ${allGroups.rows.length}`);
-        allGroups.rows.forEach(g => {
-          console.log(`   - ${g.group_name}: dates ${g.start_date ? '✅' : '❌'} start=${g.start_date}, end=${g.end_date}`);
+        allGroups.rows.forEach((g) => {
+          console.log(
+            `   - ${g.group_name}: dates ${g.start_date ? "✅" : "❌"} start=${g.start_date}, end=${g.end_date}`,
+          );
         });
 
         // Strategy 1: Timestamp-based groups (date-based cohorts)
@@ -398,85 +406,116 @@ export const approveUser = async (req, res) => {
                AND end_date IS NOT NULL
                AND start_date <= $1::timestamp
                AND end_date >= $1::timestamp`,
-              [user.created_at]
+              [user.created_at],
             );
 
-            console.log(`📅 Found ${timestampGroups.rows.length} matching timestamp groups`);
+            console.log(
+              `📅 Found ${timestampGroups.rows.length} matching timestamp groups`,
+            );
 
             for (const group of timestampGroups.rows) {
               try {
-                console.log(`   ➕ Adding user to timestamp group: ${group.group_name}`);
+                console.log(
+                  `   ➕ Adding user to timestamp group: ${group.group_name}`,
+                );
                 await pool.query(
                   `INSERT INTO group_users (group_id, user_id, assigned_at)
                    VALUES ($1, $2, NOW())
                    ON CONFLICT (group_id, user_id) DO NOTHING`,
-                  [group.group_id, userId]
+                  [group.group_id, userId],
                 );
                 assignedGroups.push(group.group_name);
                 console.log(`   ✅ Added to ${group.group_name}`);
               } catch (insertErr) {
-                console.error(`   ❌ Failed to add to ${group.group_name}:`, insertErr.message);
+                console.error(
+                  `   ❌ Failed to add to ${group.group_name}:`,
+                  insertErr.message,
+                );
               }
             }
           } catch (err) {
-            console.error(`   ❌ Error checking timestamp groups:`, err.message);
+            console.error(
+              `   ❌ Error checking timestamp groups:`,
+              err.message,
+            );
           }
         }
 
         // If timestamp-based assignments found none, run fallback assignment
         if (assignedGroups.length === 0) {
-          console.log(`🔄 No timestamp groups matched; trying fallback: assign to manual or most-recent group...`);
+          console.log(
+            `🔄 No timestamp groups matched; trying fallback: assign to manual or most-recent group...`,
+          );
           try {
             const anyGroup = await pool.query(
               `SELECT group_id, group_name FROM groups 
                WHERE start_date IS NULL OR end_date IS NULL
-               LIMIT 1`
+               LIMIT 1`,
             );
 
             if (anyGroup.rows.length > 0) {
-              console.log(`   💡 Found manual group: ${anyGroup.rows[0].group_name}`);
+              console.log(
+                `   💡 Found manual group: ${anyGroup.rows[0].group_name}`,
+              );
               try {
                 await pool.query(
                   `INSERT INTO group_users (group_id, user_id, assigned_at)
                    VALUES ($1, $2, NOW())
                    ON CONFLICT (group_id, user_id) DO NOTHING`,
-                  [anyGroup.rows[0].group_id, userId]
+                  [anyGroup.rows[0].group_id, userId],
                 );
                 assignedGroups.push(anyGroup.rows[0].group_name);
-                console.log(`   ✅ Added to fallback group: ${anyGroup.rows[0].group_name}`);
+                console.log(
+                  `   ✅ Added to fallback group: ${anyGroup.rows[0].group_name}`,
+                );
               } catch (insertErr) {
-                console.error(`   ❌ Failed to add to fallback group:`, insertErr.message);
+                console.error(
+                  `   ❌ Failed to add to fallback group:`,
+                  insertErr.message,
+                );
               }
             } else {
-              console.log(`   ⚠️  No manual groups available (no null-date groups found)`);
+              console.log(
+                `   ⚠️  No manual groups available (no null-date groups found)`,
+              );
               // As an additional fallback, pick the most-recent group (by start_date or creation)
               try {
                 const recentGroup = await pool.query(
                   `SELECT group_id, group_name, start_date, end_date FROM groups
                    ORDER BY start_date DESC NULLS LAST, group_id DESC
-                   LIMIT 1`
+                   LIMIT 1`,
                 );
 
                 if (recentGroup.rows.length > 0) {
                   const rg = recentGroup.rows[0];
-                  console.log(`   🔎 Found recent group as final fallback: ${rg.group_name} (start=${rg.start_date}, end=${rg.end_date})`);
+                  console.log(
+                    `   🔎 Found recent group as final fallback: ${rg.group_name} (start=${rg.start_date}, end=${rg.end_date})`,
+                  );
                   try {
                     await pool.query(
                       `INSERT INTO group_users (group_id, user_id, assigned_at)
                        VALUES ($1, $2, NOW())
                        ON CONFLICT (group_id, user_id) DO NOTHING`,
-                      [rg.group_id, userId]
+                      [rg.group_id, userId],
                     );
                     assignedGroups.push(rg.group_name);
-                    console.log(`   ✅ Added to recent fallback group: ${rg.group_name}`);
+                    console.log(
+                      `   ✅ Added to recent fallback group: ${rg.group_name}`,
+                    );
                   } catch (insErr) {
-                    console.error(`   ❌ Failed to add to recent fallback group:`, insErr.message);
+                    console.error(
+                      `   ❌ Failed to add to recent fallback group:`,
+                      insErr.message,
+                    );
                   }
                 } else {
                   console.log(`   ⚠️  No groups exist in DB at all.`);
                 }
               } catch (err) {
-                console.error(`   ❌ Error checking recent groups:`, err.message);
+                console.error(
+                  `   ❌ Error checking recent groups:`,
+                  err.message,
+                );
               }
             }
           } catch (err) {
@@ -484,9 +523,11 @@ export const approveUser = async (req, res) => {
           }
         }
 
-        console.log(`✅ Group assignment completed. Total groups assigned: ${assignedGroups.length}`);
+        console.log(
+          `✅ Group assignment completed. Total groups assigned: ${assignedGroups.length}`,
+        );
         if (assignedGroups.length > 0) {
-          console.log(`   Groups: ${assignedGroups.join(', ')}`);
+          console.log(`   Groups: ${assignedGroups.join(", ")}`);
         }
       } catch (error) {
         console.error("❌ Error auto-assigning user to groups:", error.message);
@@ -548,7 +589,7 @@ export const updateUserStatus = async (req, res) => {
       `,
       [status, userId],
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         message: "User not found",
@@ -569,7 +610,7 @@ export const debugUserGroups = async (req, res) => {
     // Get user info
     const userResult = await pool.query(
       `SELECT user_id, full_name, created_at, headline FROM users WHERE user_id = $1`,
-      [userId]
+      [userId],
     );
 
     if (userResult.rows.length === 0) {
@@ -580,21 +621,23 @@ export const debugUserGroups = async (req, res) => {
 
     // Get all groups
     const allGroups = await pool.query(
-      `SELECT group_id, group_name, start_date, end_date, created_by FROM groups`
+      `SELECT group_id, group_name, start_date, end_date, created_by FROM groups`,
     );
 
     // Check timestamp groups
     const timestampMatches = [];
     for (const group of allGroups.rows) {
       if (group.created_by === null && group.start_date && group.end_date) {
-        const isMatch = user.created_at >= group.start_date && user.created_at <= group.end_date;
+        const isMatch =
+          user.created_at >= group.start_date &&
+          user.created_at <= group.end_date;
         timestampMatches.push({
           group_id: group.group_id,
           group_name: group.group_name,
           user_created_at: user.created_at,
           group_start_date: group.start_date,
           group_end_date: group.end_date,
-          isMatch: isMatch
+          isMatch: isMatch,
         });
       }
     }
@@ -607,7 +650,7 @@ export const debugUserGroups = async (req, res) => {
       `SELECT gu.group_id, g.group_name FROM group_users gu 
        JOIN groups g ON gu.group_id = g.group_id 
        WHERE gu.user_id = $1`,
-      [userId]
+      [userId],
     );
 
     res.json({
@@ -615,7 +658,7 @@ export const debugUserGroups = async (req, res) => {
       timestampGroupMatches: timestampMatches,
       collegeMatch: collegeMatch,
       currentAssignments: currentGroups.rows,
-      allGroups: allGroups.rows
+      allGroups: allGroups.rows,
     });
   } catch (error) {
     console.error("debugUserGroups error:", error);
@@ -629,8 +672,14 @@ export const diagnosticDatabaseSchema = async (req, res) => {
     const diagnostics = {};
 
     // 1. Check if tables exist and their structure
-    const tables = ['users', 'groups', 'group_users', 'courses', 'course_assignments'];
-    
+    const tables = [
+      "users",
+      "groups",
+      "group_users",
+      "courses",
+      "course_assignments",
+    ];
+
     for (const tableName of tables) {
       try {
         const tableInfo = await pool.query(
@@ -638,14 +687,14 @@ export const diagnosticDatabaseSchema = async (req, res) => {
            FROM information_schema.columns
            WHERE table_name = $1
            ORDER BY ordinal_position`,
-          [tableName]
+          [tableName],
         );
 
         if (tableInfo.rows.length > 0) {
           diagnostics[tableName] = {
             exists: true,
             columns: tableInfo.rows,
-            columnNames: tableInfo.rows.map(c => c.column_name)
+            columnNames: tableInfo.rows.map((c) => c.column_name),
           };
         } else {
           diagnostics[tableName] = { exists: false };
@@ -659,48 +708,70 @@ export const diagnosticDatabaseSchema = async (req, res) => {
     try {
       const userCount = await pool.query(`SELECT COUNT(*) as count FROM users`);
       diagnostics.userCount = userCount.rows[0].count;
-    } catch (e) { diagnostics.userCount = 'Error'; }
+    } catch (e) {
+      diagnostics.userCount = "Error";
+    }
 
     try {
-      const groupCount = await pool.query(`SELECT COUNT(*) as count FROM groups`);
+      const groupCount = await pool.query(
+        `SELECT COUNT(*) as count FROM groups`,
+      );
       diagnostics.groupCount = groupCount.rows[0].count;
-    } catch (e) { diagnostics.groupCount = 'Error'; }
+    } catch (e) {
+      diagnostics.groupCount = "Error";
+    }
 
     try {
-      const groupUsersCount = await pool.query(`SELECT COUNT(*) as count FROM group_users`);
+      const groupUsersCount = await pool.query(
+        `SELECT COUNT(*) as count FROM group_users`,
+      );
       diagnostics.groupUsersCount = groupUsersCount.rows[0].count;
-    } catch (e) { diagnostics.groupUsersCount = 'Error'; }
+    } catch (e) {
+      diagnostics.groupUsersCount = "Error";
+    }
 
     // 3. Show sample data
     try {
       const sampleGroups = await pool.query(`SELECT * FROM groups LIMIT 5`);
       diagnostics.sampleGroups = sampleGroups.rows;
-    } catch (e) { diagnostics.sampleGroups = []; }
+    } catch (e) {
+      diagnostics.sampleGroups = [];
+    }
 
     try {
-      const sampleGroupUsers = await pool.query(`SELECT * FROM group_users LIMIT 5`);
+      const sampleGroupUsers = await pool.query(
+        `SELECT * FROM group_users LIMIT 5`,
+      );
       diagnostics.sampleGroupUsers = sampleGroupUsers.rows;
-    } catch (e) { diagnostics.sampleGroupUsers = []; }
+    } catch (e) {
+      diagnostics.sampleGroupUsers = [];
+    }
 
     try {
-      const pendingStudents = await pool.query(`SELECT user_id, full_name, email, created_at FROM users WHERE role = 'student' AND status = 'pending' LIMIT 5`);
+      const pendingStudents = await pool.query(
+        `SELECT user_id, full_name, email, created_at FROM users WHERE role = 'student' AND status = 'pending' LIMIT 5`,
+      );
       diagnostics.pendingStudents = pendingStudents.rows;
-    } catch (e) { diagnostics.pendingStudents = []; }
+    } catch (e) {
+      diagnostics.pendingStudents = [];
+    }
 
     // 4. Check constraints and indexes
     try {
       const constraints = await pool.query(
         `SELECT constraint_name, constraint_type
          FROM information_schema.table_constraints
-         WHERE table_name IN ('group_users', 'groups', 'users')`
+         WHERE table_name IN ('group_users', 'groups', 'users')`,
       );
       diagnostics.constraints = constraints.rows;
-    } catch (e) { diagnostics.constraints = []; }
+    } catch (e) {
+      diagnostics.constraints = [];
+    }
 
     res.json({
       timestamp: new Date().toISOString(),
       diagnostics: diagnostics,
-      recommendations: generateRecommendations(diagnostics)
+      recommendations: generateRecommendations(diagnostics),
     });
   } catch (error) {
     console.error("diagnosticDatabaseSchema error:", error);
@@ -716,7 +787,7 @@ export const bulkAssignStudentsToGroup = async (req, res) => {
     // Verify group exists
     const groupCheck = await pool.query(
       `SELECT group_id, group_name FROM groups WHERE group_id = $1`,
-      [groupId]
+      [groupId],
     );
 
     if (groupCheck.rows.length === 0) {
@@ -727,10 +798,12 @@ export const bulkAssignStudentsToGroup = async (req, res) => {
 
     // Get all active students (not including pending)
     const activeStudents = await pool.query(
-      `SELECT user_id FROM users WHERE role = 'student' AND status = 'active'`
+      `SELECT user_id FROM users WHERE role = 'student' AND status = 'active'`,
     );
 
-    console.log(`📊 Found ${activeStudents.rows.length} active students to assign to group ${group.group_name}`);
+    console.log(
+      `📊 Found ${activeStudents.rows.length} active students to assign to group ${group.group_name}`,
+    );
 
     let assignedCount = 0;
     for (const student of activeStudents.rows) {
@@ -739,27 +812,32 @@ export const bulkAssignStudentsToGroup = async (req, res) => {
           `INSERT INTO group_users (group_id, user_id, assigned_at)
            VALUES ($1, $2, NOW())
            ON CONFLICT (group_id, user_id) DO NOTHING`,
-          [groupId, student.user_id]
+          [groupId, student.user_id],
         );
         assignedCount++;
       } catch (err) {
-        console.error(`Failed to assign student ${student.user_id}:`, err.message);
+        console.error(
+          `Failed to assign student ${student.user_id}:`,
+          err.message,
+        );
       }
     }
 
-    console.log(`✅ Successfully assigned ${assignedCount} students to group ${group.group_name}`);
+    console.log(
+      `✅ Successfully assigned ${assignedCount} students to group ${group.group_name}`,
+    );
 
     res.json({
       message: `Successfully assigned ${assignedCount} students to group: ${group.group_name}`,
       groupId: groupId,
       groupName: group.group_name,
-      studentsAssigned: assignedCount
+      studentsAssigned: assignedCount,
     });
   } catch (error) {
     console.error("bulkAssignStudentsToGroup error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
-}
+};
 
 // Helper function to generate recommendations
 function generateRecommendations(diagnostics) {
@@ -767,43 +845,56 @@ function generateRecommendations(diagnostics) {
 
   if (!diagnostics.group_users?.exists) {
     recommendations.push({
-      severity: 'CRITICAL',
-      message: 'group_users table does not exist!',
-      action: 'You need to create the group_users table with columns: group_id, user_id, assigned_at'
+      severity: "CRITICAL",
+      message: "group_users table does not exist!",
+      action:
+        "You need to create the group_users table with columns: group_id, user_id, assigned_at",
     });
   }
 
-  if (diagnostics.groupCount === 0 || diagnostics.groupCount === '0') {
+  if (diagnostics.groupCount === 0 || diagnostics.groupCount === "0") {
     recommendations.push({
-      severity: 'WARNING',
-      message: 'No groups exist in the database',
-      action: 'Create at least one group before assigning users'
+      severity: "WARNING",
+      message: "No groups exist in the database",
+      action: "Create at least one group before assigning users",
     });
   }
 
-  if (diagnostics.groupUsersCount === 0 || diagnostics.groupUsersCount === '0') {
+  if (
+    diagnostics.groupUsersCount === 0 ||
+    diagnostics.groupUsersCount === "0"
+  ) {
     recommendations.push({
-      severity: 'INFO',
-      message: 'No users have been assigned to groups yet',
-      action: 'This is normal - assignments should happen when admin approves users'
+      severity: "INFO",
+      message: "No users have been assigned to groups yet",
+      action:
+        "This is normal - assignments should happen when admin approves users",
     });
   }
 
   const requiredColumns = {
-    users: ['user_id', 'full_name', 'email', 'role', 'status', 'created_at', 'headline'],
-    groups: ['group_id', 'group_name', 'start_date', 'end_date', 'created_by'],
-    group_users: ['group_id', 'user_id', 'assigned_at']
+    users: [
+      "user_id",
+      "full_name",
+      "email",
+      "role",
+      "status",
+      "created_at",
+      "headline",
+    ],
+    groups: ["group_id", "group_name", "start_date", "end_date", "created_by"],
+    group_users: ["group_id", "user_id", "assigned_at"],
   };
 
   for (const [table, columns] of Object.entries(requiredColumns)) {
     if (diagnostics[table]?.exists) {
       const tableColumns = diagnostics[table].columnNames;
-      const missing = columns.filter(col => !tableColumns.includes(col));
+      const missing = columns.filter((col) => !tableColumns.includes(col));
       if (missing.length > 0) {
         recommendations.push({
-          severity: 'ERROR',
-          message: `Table '${table}' is missing columns: ${missing.join(', ')}`,
-          action: `Add these columns to the ${table} table`
+          severity: "ERROR",
+          message: `Table '${table}' is missing columns: ${missing.join(", ")}`,
+          action: `Add these columns to the ${table} table`,
         });
       }
     }
