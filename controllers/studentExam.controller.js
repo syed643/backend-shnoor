@@ -148,6 +148,11 @@ WHERE o.question_id = q.question_id
       // ✅ Shuffle OPTIONS per MCQ safely
       examPayload.questions.forEach((question, index) => {
         if (question.type === "mcq" && Array.isArray(question.options)) {
+          console.log(
+            "MCQ DEBUG:",
+            q.id,
+            Array.isArray(q.options) ? q.options.length : q.options,
+          );
           const optionSeed = baseSeed + hashString(`${question.id}:${index}`);
           shuffleWithSeed(question.options, optionSeed);
         }
