@@ -1,6 +1,7 @@
 import express from "express";
 import {
   assignCourseToStudent,
+  assignCourseToGroup,
   unassignCourse,
   getMyCourses,
   getPublishedCourses,
@@ -33,6 +34,13 @@ router.post(
   unassignCourse
 );
 
+router.post(
+  "/assign-group",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  assignCourseToGroup
+);
 
 router.get(
   "/my-courses",

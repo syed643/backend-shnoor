@@ -90,6 +90,122 @@ export const assignCourseToStudent = async (req, res) => {
   }
 };
 
+export const assignCourseToGroup = async (req, res) => {
+  const { course_id, group_id } = req.body;
+
+  try {
+    // 1️⃣ Ensure course exists and is approved
+    const courseResult = await pool.query(
+      `SELECT course_id, title
+       FROM courses
+       WHERE course_id = $1 AND status = 'approved'`,
+      [course_id]
+    );
+
+    if (courseResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "Course not found or not approved",
+      });
+    }
+
+    const courseTitle = courseResult.rows[0].title;
+
+    // 2️⃣ Ensure group exists
+    const groupResult = await pool.query(
+      `SELECT group_id, group_name
+       FROM groups
+       WHERE group_id = $1`,
+      [group_id]
+    );
+
+    if (groupResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "Group not found",
+      });
+    }
+
+    const groupName = groupResult.rows[0].group_name;
+
+    // 3️⃣ Get all students in the group
+    const studentsResult = await pool.query(
+      `SELECT DISTINCT gu.user_id
+       FROM group_users gu
+       JOIN users u ON gu.user_id = u.user_id
+       WHERE gu.group_id = $1 AND u.role = 'student' AND u.status = 'active'`,
+      [group_id]
+    );
+
+    if (studentsResult.rows.length === 0) {
+      return res.status(400).json({
+        message: "Group has no active students",
+      });
+    }
+
+    const studentIds = studentsResult.rows.map(row => row.user_id);
+
+    // 4️⃣ Assign course to all students in the group
+    let assignedCount = 0;
+    for (const student_id of studentIds) {
+      try {
+        // Check if already assigned
+        const existingAssignment = await pool.query(
+          `SELECT assignment_id
+           FROM course_assignments
+           WHERE course_id = $1 AND student_id = $2`,
+          [course_id, student_id]
+        );
+
+        if (existingAssignment.rows.length === 0) {
+          // Insert new assignment
+          await pool.query(
+            `INSERT INTO course_assignments (course_id, student_id)
+             VALUES ($1, $2)`,
+            [course_id, student_id]
+          );
+
+          assignedCount++;
+
+          // Create notification for this student
+          await pool.query(
+            `INSERT INTO notifications (user_id, message, link) VALUES ($1, $2, $3)`,
+            [
+              student_id,
+              `New course assigned: ${courseTitle} (via group: ${groupName})`,
+              `/student/course/${course_id}`,
+            ]
+          );
+
+          // Trigger Real-time + Web Push notification
+          try {
+            emitNotificationToUser(student_id, {
+              id: Date.now(),
+              message: `New course assigned: ${courseTitle} (via group: ${groupName})`,
+              link: `/student/course/${course_id}`,
+              type: "COURSE_ASSIGNED",
+              is_read: false,
+              created_at: new Date().toISOString()
+            });
+          } catch (socketErr) {
+            console.error("Socket emit failed for student", student_id, ":", socketErr);
+          }
+        }
+      } catch (studentError) {
+        console.error(`Failed to assign course to student ${student_id}:`, studentError);
+        // Continue with next student instead of failing entire operation
+      }
+    }
+
+    res.status(201).json({
+      message: `Course assigned to ${assignedCount} students in group "${groupName}"`,
+      assigned_count: assignedCount,
+      total_students: studentIds.length,
+    });
+  } catch (error) {
+    console.error("assignCourseToGroup error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const getMyCourses = async (req, res) => {
   try {
     const studentId = req.user.id;
