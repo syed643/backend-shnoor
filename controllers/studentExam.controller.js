@@ -113,7 +113,62 @@ export const getExamForAttempt = async (req, res) => {
     /* =========================
        4️⃣ SEND RESPONSE
     ========================= */
-    res.json(rows[0]);
+    const examPayload = rows[0];
+
+    if (Array.isArray(examPayload?.questions)) {
+      const hashString = (value) => {
+        let hash = 0;
+        for (let i = 0; i < value.length; i += 1) {
+          hash = (hash << 5) - hash + value.charCodeAt(i);
+          hash |= 0;
+        }
+        return hash >>> 0;
+      };
+
+      const seededRandom = (seed) => {
+        let t = seed + 0x6d2b79f5;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+
+      const shuffleWithSeed = (items, seed) => {
+        for (let i = items.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(seededRandom(seed + i) * (i + 1));
+          [items[i], items[j]] = [items[j], items[i]];
+        }
+      };
+
+      const baseSeed = hashString(`${studentId}:${examId}`);
+      const mcqQuestions = examPayload.questions.filter(
+        (question) => question.type === "mcq",
+      );
+
+      shuffleWithSeed(mcqQuestions, baseSeed);
+
+      mcqQuestions.forEach((question, index) => {
+        if (!Array.isArray(question.options)) {
+          return;
+        }
+
+        const optionSeed =
+          baseSeed + hashString(`${question.id}:${index}`);
+        shuffleWithSeed(question.options, optionSeed);
+      });
+
+      let mcqIndex = 0;
+      examPayload.questions = examPayload.questions.map((question) => {
+        if (question.type !== "mcq") {
+          return question;
+        }
+
+        const shuffledQuestion = mcqQuestions[mcqIndex];
+        mcqIndex += 1;
+        return shuffledQuestion;
+      });
+    }
+
+    res.json(examPayload);
   } catch (err) {
     console.error("getExamForAttempt error:", err);
     res.status(500).json({ message: "Internal server error" });
