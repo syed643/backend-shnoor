@@ -141,30 +141,16 @@ WHERE o.question_id = q.question_id
       };
 
       const baseSeed = hashString(`${studentId}:${examId}`);
-      const mcqQuestions = examPayload.questions.filter(
-        (question) => question.type === "mcq",
-      );
 
-      shuffleWithSeed(mcqQuestions, baseSeed);
+      // ✅ Shuffle QUESTIONS safely (keeps objects intact)
+      shuffleWithSeed(examPayload.questions, baseSeed);
 
-      mcqQuestions.forEach((question, index) => {
-        if (!Array.isArray(question.options)) {
-          return;
+      // ✅ Shuffle OPTIONS per MCQ safely
+      examPayload.questions.forEach((question, index) => {
+        if (question.type === "mcq" && Array.isArray(question.options)) {
+          const optionSeed = baseSeed + hashString(`${question.id}:${index}`);
+          shuffleWithSeed(question.options, optionSeed);
         }
-
-        const optionSeed = baseSeed + hashString(`${question.id}:${index}`);
-        shuffleWithSeed(question.options, optionSeed);
-      });
-
-      let mcqIndex = 0;
-      examPayload.questions = examPayload.questions.map((question) => {
-        if (question.type !== "mcq") {
-          return question;
-        }
-
-        const shuffledQuestion = mcqQuestions[mcqIndex];
-        mcqIndex += 1;
-        return shuffledQuestion;
       });
     }
 
