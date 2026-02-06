@@ -79,16 +79,46 @@ ORDER BY created_at DESC;
 };*/}
 
 export const assignCourses = async (req, res) => {
-  const { studentIds, courseIds } = req.body;
+  const { studentIds = [], groupIds = [], courseIds } = req.body;
 
-  if (!studentIds?.length || !courseIds?.length) {
+  if (!courseIds?.length) {
     return res.status(400).json({
-      message: "studentIds and courseIds are required",
+      message: "courseIds are required",
+    });
+  }
+
+  if (studentIds.length === 0 && groupIds.length === 0) {
+    return res.status(400).json({
+      message: "At least one studentId or groupId is required",
     });
   }
 
   try {
-    // Assign courses
+    // 1️⃣ Collect all student IDs from selected groups
+    let allStudentIds = [...studentIds];
+
+    if (groupIds.length > 0) {
+      const groupStudentsResult = await pool.query(
+        `SELECT DISTINCT gu.user_id
+         FROM group_users gu
+         JOIN users u ON gu.user_id = u.user_id
+         WHERE gu.group_id = ANY($1::uuid[])
+           AND u.role = 'student'
+           AND u.status = 'active'`,
+        [groupIds]
+      );
+
+      const groupStudentIds = groupStudentsResult.rows.map(row => row.user_id);
+      allStudentIds = [...new Set([...allStudentIds, ...groupStudentIds])]; // Remove duplicates
+    }
+
+    if (allStudentIds.length === 0) {
+      return res.status(400).json({
+        message: "No active students found in the selected groups/students",
+      });
+    }
+
+    // 2️⃣ Assign courses to all collected students
     const query = `
       INSERT INTO course_assignments (student_id, course_id)
       SELECT s_id, c_id
@@ -97,9 +127,9 @@ export const assignCourses = async (req, res) => {
       ON CONFLICT DO NOTHING;
     `;
 
-    await pool.query(query, [studentIds, courseIds]);
+    await pool.query(query, [allStudentIds, courseIds]);
 
-    // Fetch course titles once for notifications
+    // 3️⃣ Fetch course titles once for notifications
     const coursesRes = await pool.query(
       `SELECT courses_id, title FROM courses WHERE courses_id = ANY($1::uuid[])`,
       [courseIds]
@@ -108,10 +138,10 @@ export const assignCourses = async (req, res) => {
       coursesRes.rows.map((c) => [c.courses_id, c.title])
     );
 
-    // Create notifications and send emails to students
-    console.log("Starting notification creation for students:", studentIds);
+    // 4️⃣ Create notifications and send emails to all students
+    console.log("Starting notification creation for students:", allStudentIds);
 
-    for (const studentId of studentIds) {
+    for (const studentId of allStudentIds) {
       try {
         // Fetch student email and name from database
         const studentResult = await pool.query(
@@ -165,7 +195,8 @@ export const assignCourses = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Courses assigned successfully",
+      message: `Courses assigned successfully to ${allStudentIds.length} student(s)`,
+      students_count: allStudentIds.length,
     });
   } catch (error) {
     console.error("Assign courses error:", error);
