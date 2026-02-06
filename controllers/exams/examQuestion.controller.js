@@ -66,13 +66,18 @@ export const addMcqQuestion = async (req, res) => {
     const { examId } = req.params;
     const { questionText, options, correctOption, marks, order } = req.body;
 
+    // 🔒 STRICT VALIDATION
     if (
       !questionText ||
       !Array.isArray(options) ||
-      options.length < 2 ||
-      !options.includes(correctOption)
+      options.length !== 4 ||
+      options.some(o => !o || !o.trim()) ||
+      !correctOption ||
+      !options.map(o => o.trim()).includes(correctOption.trim())
     ) {
-      return res.status(400).json({ message: "Invalid MCQ data" });
+      return res.status(400).json({
+        message: "MCQ must have exactly 4 non-empty options",
+      });
     }
 
     await client.query("BEGIN");
@@ -84,19 +89,27 @@ export const addMcqQuestion = async (req, res) => {
       VALUES ($1, $2, $3, $4, 'mcq')
       RETURNING question_id
       `,
-      [examId, questionText, marks ?? 1, order ?? 1]
+      [examId, questionText.trim(), marks ?? 1, order ?? 1]
     );
 
     const questionId = questionRes.rows[0].question_id;
 
-    for (const option of options) {
+    // ✅ INSERT OPTIONS WITH ORDER
+    for (let i = 0; i < options.length; i++) {
+      const opt = options[i].trim();
+
       await client.query(
         `
         INSERT INTO exam_mcq_options
-          (question_id, option_text, is_correct)
-        VALUES ($1, $2, $3)
+          (question_id, option_text, is_correct, option_order)
+        VALUES ($1, $2, $3, $4)
         `,
-        [questionId, option, option.trim() === correctOption.trim()]
+        [
+          questionId,
+          opt,
+          opt === correctOption.trim(),
+          i + 1
+        ]
       );
     }
 
@@ -114,4 +127,5 @@ export const addMcqQuestion = async (req, res) => {
     client.release();
   }
 };
+
 

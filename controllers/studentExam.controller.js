@@ -92,9 +92,10 @@ export const getExamForAttempt = async (req, res) => {
               'type', q.question_type,
               'marks', q.marks,
               'options', (
-                SELECT json_agg(o.option_text)
-                FROM exam_mcq_options o
-                WHERE o.question_id = q.question_id
+               SELECT json_agg(o.option_text ORDER BY o.option_order)
+FROM exam_mcq_options o
+WHERE o.question_id = q.question_id
+  AND o.option_text IS NOT NULL
               )
             )
             ORDER BY q.question_order
@@ -151,8 +152,7 @@ export const getExamForAttempt = async (req, res) => {
           return;
         }
 
-        const optionSeed =
-          baseSeed + hashString(`${question.id}:${index}`);
+        const optionSeed = baseSeed + hashString(`${question.id}:${index}`);
         shuffleWithSeed(question.options, optionSeed);
       });
 
@@ -187,7 +187,7 @@ export const submitExam = async (req, res) => {
       FROM exam_submissions
       WHERE exam_id = $1 AND student_id = $2
       `,
-      [examId, studentId]
+      [examId, studentId],
     );
 
     if (attempted.rowCount > 0) {
@@ -205,13 +205,12 @@ export const submitExam = async (req, res) => {
         (exam_id, student_id, answers, submitted_at)
       VALUES ($1, $2, $3, NOW())
       `,
-      [examId, studentId, answers]
+      [examId, studentId, answers],
     );
 
     return res.status(200).json({
       message: "Exam submitted successfully",
     });
-
   } catch (err) {
     console.error("submitExam error:", err);
     return res.status(500).json({
@@ -220,9 +219,8 @@ export const submitExam = async (req, res) => {
   }
 };
 
-
-
-{/*export const submitExam = async (req, res) => {
+{
+  /*export const submitExam = async (req, res) => {
   try {
     const { examId } = req.params;
     const studentId = req.user.id;
@@ -312,4 +310,5 @@ export const submitExam = async (req, res) => {
       message: "Failed to submit exam",
     });
   }
-};*/}
+};*/
+}
