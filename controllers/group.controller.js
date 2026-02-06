@@ -67,6 +67,7 @@ export const getGroups = async (req, res) => {
                  WHERE u.created_at >= g.start_date
                    AND u.created_at <= g.end_date
                    AND u.role = 'student'
+                   AND u.status = 'active'
                    AND (u.headline IS NULL OR u.headline = '')
                )
                -- College manual groups (admin-created, date-open)
