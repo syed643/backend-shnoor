@@ -21,6 +21,7 @@ import notificationRoutes from "./routes/notification.routes.js";
 import http from "http";
 import { Server } from "socket.io";
 import { initChatTables, serveFile } from "./controllers/chat.controller.js";
+import botRoutes from "./routes/bot.routes.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -65,6 +66,7 @@ app.use("/api/chats", chatRoutes);
 app.use("/api/practice", practiceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/bot", botRoutes); // For bot media uploads
 
 
 app.get("/", (req, res) => {
