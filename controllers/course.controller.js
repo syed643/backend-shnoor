@@ -351,7 +351,8 @@ export const exploreCourses = async (req, res) => {
         c.price_amount,
         c.schedule_start_at,
         c.thumbnail_url,
-        u.full_name AS instructorName
+        c.instructor_id,
+        u.full_name AS instructor_name
       FROM courses c
       LEFT JOIN users u ON u.user_id = c.instructor_id
       WHERE c.status = 'approved'

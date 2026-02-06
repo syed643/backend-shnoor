@@ -195,9 +195,15 @@ export const getMyCourses = async (req, res) => {
       c.status,
       c.created_at,
       c.price_type,
-      c.price_amount
+      c.price_amount,
+      c.instructor_id,
+      u.full_name AS instructor_name,
+      CASE WHEN ir.course_id IS NULL THEN false ELSE true END AS has_reviewed
     FROM student_courses sc
     JOIN courses c ON c.courses_id = sc.course_id
+    LEFT JOIN users u ON u.user_id = c.instructor_id
+    LEFT JOIN instructor_reviews ir
+      ON ir.course_id = c.courses_id AND ir.student_id = sc.student_id
     WHERE sc.student_id = $1
     `,
     [studentId],
