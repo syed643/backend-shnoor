@@ -10,10 +10,17 @@ export const createGroup = async (req, res) => {
   // For timestamp groups, require dates
   if (start_date || end_date) {
     if (!start_date || !end_date) {
-      return res.status(400).json({ message: "Both start date and end date are required for timestamp groups" });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Both start date and end date are required for timestamp groups",
+        });
     }
     if (new Date(start_date) >= new Date(end_date)) {
-      return res.status(400).json({ message: "Start date must be before end date" });
+      return res
+        .status(400)
+        .json({ message: "Start date must be before end date" });
     }
   }
 
@@ -23,22 +30,24 @@ export const createGroup = async (req, res) => {
     // Check if group with same name already exists
     const existing = await pool.query(
       `SELECT group_id FROM groups WHERE UPPER(group_name) = $1`,
-      [normalizedName]
+      [normalizedName],
     );
 
     if (existing.rows.length > 0) {
-      return res.status(409).json({ message: "A group with the same name already exists" });
+      return res
+        .status(409)
+        .json({ message: "A group with the same name already exists" });
     }
 
     // CRITICAL FIX: For timestamp groups (both dates provided), created_by must be NULL
     // For manual groups (no dates), created_by should be the admin's ID
-    const createdBy = (start_date && end_date) ? null : (req.user?.id || null);
+    const createdBy = start_date && end_date ? null : req.user?.id || null;
 
     const result = await pool.query(
       `INSERT INTO groups (group_name, start_date, end_date, created_by)
        VALUES ($1, $2, $3, $4)
        RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
-      [normalizedName, start_date || null, end_date || null, createdBy]
+      [normalizedName, start_date || null, end_date || null, createdBy],
     );
 
     const group = result.rows[0];
@@ -56,9 +65,14 @@ export const getGroups = async (req, res) => {
     let query = `
       SELECT g.group_id, g.group_name, g.start_date, g.end_date, g.created_by, g.created_at,
              CASE 
-               -- Manual groups: count from group_users
+-- Manual groups: count from group_users (only active students)
                WHEN g.created_by IS NOT NULL THEN (
-                 SELECT COUNT(*)::int FROM group_users gu WHERE gu.group_id = g.group_id
+                 SELECT COUNT(*)::int 
+                 FROM group_users gu 
+                 JOIN users u ON gu.user_id = u.user_id
+                 WHERE gu.group_id = g.group_id
+                   AND u.status = 'active'
+                   AND u.role = 'student'
                )
                -- Timestamp groups: date-based cohorts (no college)
                WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NOT NULL THEN (
@@ -87,7 +101,7 @@ export const getGroups = async (req, res) => {
 
     // Try to add college groups if the view exists
     try {
-      await pool.query('SELECT 1 FROM college_groups LIMIT 1');
+      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
       query = `
         SELECT g.group_id, g.group_name, g.start_date, g.end_date, g.created_by, g.created_at,
                CASE 
@@ -138,9 +152,7 @@ export const getGroups = async (req, res) => {
     // For manual groups (created_by not null) that don't use timestamp logic,
     // send start_date as the group creation time so the frontend doesn't see 1970-01-01.
     const groupsWithDisplayDates = result.rows.map((g) =>
-      g.created_by && !g.start_date
-        ? { ...g, start_date: g.created_at }
-        : g
+      g.created_by && !g.start_date ? { ...g, start_date: g.created_at } : g,
     );
 
     res.status(200).json(groupsWithDisplayDates);
@@ -158,7 +170,7 @@ export const getGroup = async (req, res) => {
     const groupResult = await pool.query(
       `SELECT group_id, group_name, start_date, end_date, created_by, created_at
        FROM groups WHERE group_id = $1`,
-      [groupId]
+      [groupId],
     );
 
     if (groupResult.rows.length > 0) {
@@ -171,7 +183,7 @@ export const getGroup = async (req, res) => {
         }
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count FROM group_users WHERE group_id = $1`,
-          [groupId]
+          [groupId],
         );
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
@@ -186,7 +198,7 @@ export const getGroup = async (req, res) => {
              (u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = ''))
              OR gu.group_id = $3
            )`,
-          [group.start_date, group.end_date, group.group_id]
+          [group.start_date, group.end_date, group.group_id],
         );
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
@@ -194,7 +206,7 @@ export const getGroup = async (req, res) => {
         // College manual group
         const userCountResult = await pool.query(
           `SELECT COUNT(*)::int AS user_count FROM group_users WHERE group_id = $1`,
-          [groupId]
+          [groupId],
         );
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
@@ -204,7 +216,7 @@ export const getGroup = async (req, res) => {
           `SELECT COUNT(*)::int AS user_count
            FROM users u
            WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student'`,
-          [group.group_name]
+          [group.group_name],
         );
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
@@ -213,11 +225,11 @@ export const getGroup = async (req, res) => {
 
     // Check if it's a college group from the view
     try {
-      await pool.query('SELECT 1 FROM college_groups LIMIT 1');
+      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
       const collegeResult = await pool.query(
         `SELECT group_id, group_name, start_date, end_date, created_at
          FROM college_groups WHERE group_id = $1`,
-        [groupId]
+        [groupId],
       );
 
       if (collegeResult.rows.length > 0) {
@@ -228,7 +240,7 @@ export const getGroup = async (req, res) => {
           `SELECT COUNT(*)::int AS user_count
            FROM users u
            WHERE u.headline = $1 AND u.role = 'student'`,
-          [group.group_name]
+          [group.group_name],
         );
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
@@ -249,7 +261,10 @@ export const getGroupUsers = async (req, res) => {
 
   try {
     // Check if it's a manual group
-    const groupCheck = await pool.query(`SELECT group_name, start_date, end_date, created_by FROM groups WHERE group_id = $1`, [groupId]);
+    const groupCheck = await pool.query(
+      `SELECT group_name, start_date, end_date, created_by FROM groups WHERE group_id = $1`,
+      [groupId],
+    );
     if (groupCheck.rows.length > 0) {
       const { start_date, end_date, created_by } = groupCheck.rows[0];
       if (created_by) {
@@ -266,7 +281,7 @@ export const getGroupUsers = async (req, res) => {
            JOIN users u ON gu.user_id = u.user_id
            WHERE gu.group_id = $1
            ORDER BY gu.assigned_at`,
-          [groupId]
+          [groupId],
         );
         return res.status(200).json(result.rows);
       } else if (start_date && end_date) {
@@ -282,7 +297,7 @@ export const getGroupUsers = async (req, res) => {
            WHERE ((u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = ''))
                   OR gu.group_id = $3)
            ORDER BY assigned_at`,
-          [start_date, end_date, groupId]
+          [start_date, end_date, groupId],
         );
         return res.status(200).json(result.rows);
       } else if (start_date && !end_date) {
@@ -299,7 +314,7 @@ export const getGroupUsers = async (req, res) => {
            JOIN users u ON gu.user_id = u.user_id
            WHERE gu.group_id = $1
            ORDER BY gu.assigned_at`,
-          [groupId]
+          [groupId],
         );
         return res.status(200).json(result.rows);
       } else {
@@ -314,15 +329,18 @@ export const getGroupUsers = async (req, res) => {
            FROM users u
            WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student'
            ORDER BY u.created_at`,
-          [collegeName]
+          [collegeName],
         );
         return res.status(200).json(result.rows);
       }
     } else {
       // Check if it's a college group from the view
       try {
-        await pool.query('SELECT 1 FROM college_groups LIMIT 1');
-        const collegeCheck = await pool.query(`SELECT group_name FROM college_groups WHERE group_id = $1`, [groupId]);
+        await pool.query("SELECT 1 FROM college_groups LIMIT 1");
+        const collegeCheck = await pool.query(
+          `SELECT group_name FROM college_groups WHERE group_id = $1`,
+          [groupId],
+        );
         if (collegeCheck.rows.length > 0) {
           const collegeName = collegeCheck.rows[0].group_name;
           // Use exact match since college_groups.group_name is the actual college name
@@ -335,14 +353,14 @@ export const getGroupUsers = async (req, res) => {
              FROM users u
              WHERE u.headline = $1 AND u.role = 'student'
              ORDER BY u.created_at`,
-            [collegeName]
+            [collegeName],
           );
           return res.status(200).json(result.rows);
         }
       } catch (e) {
         console.log("College groups view not available:", e.message);
       }
-      return res.status(404).json({ message: 'Group not found' });
+      return res.status(404).json({ message: "Group not found" });
     }
   } catch (error) {
     console.error("getGroupUsers error:", error);
@@ -357,12 +375,18 @@ export const addUserToGroup = async (req, res) => {
 
   try {
     // Check if group is college group (created_by null)
-    const groupCheck = await pool.query(`SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`, [groupId]);
+    const groupCheck = await pool.query(
+      `SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`,
+      [groupId],
+    );
     if (groupCheck.rows.length === 0) {
       // Check college view
       try {
-        await pool.query('SELECT 1 FROM college_groups LIMIT 1');
-        const collegeCheck = await pool.query(`SELECT group_name FROM college_groups WHERE group_id = $1`, [groupId]);
+        await pool.query("SELECT 1 FROM college_groups LIMIT 1");
+        const collegeCheck = await pool.query(
+          `SELECT group_name FROM college_groups WHERE group_id = $1`,
+          [groupId],
+        );
         if (collegeCheck.rows.length === 0) {
           return res.status(404).json({ message: "Group not found" });
         }
@@ -373,21 +397,31 @@ export const addUserToGroup = async (req, res) => {
           `UPDATE users
            SET "headline/college_name" = $1
            WHERE user_id = $2 AND role = 'student' AND status = 'active'`,
-          [groupName, userId]
+          [groupName, userId],
         );
         if (updateResult.rowCount === 0) {
           return res
             .status(400)
-            .json({ message: "Only active students can be added to college groups" });
+            .json({
+              message: "Only active students can be added to college groups",
+            });
         }
-        return res.status(200).json({ message: "Student added to college group" });
+        return res
+          .status(200)
+          .json({ message: "Student added to college group" });
       } catch (e) {
         console.log("College groups view not available:", e.message);
-        return res.status(400).json({ message: "College groups not supported" });
+        return res
+          .status(400)
+          .json({ message: "College groups not supported" });
       }
     }
 
-    const { created_by, start_date: groupStartDate, end_date: groupEndDate } = groupCheck.rows[0];
+    const {
+      created_by,
+      start_date: groupStartDate,
+      end_date: groupEndDate,
+    } = groupCheck.rows[0];
     if (created_by || (groupStartDate && !groupEndDate)) {
       // Manual or college manual group
       await pool.query(
@@ -395,14 +429,18 @@ export const addUserToGroup = async (req, res) => {
          VALUES ($1, $2, NOW(), $3, $4)
          ON CONFLICT (group_id, user_id)
          DO UPDATE SET start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
-        [groupId, userId, start_date || null, end_date || null]
+        [groupId, userId, start_date || null, end_date || null],
       );
       return res.status(200).json({ message: "Student added to group" });
     }
 
     if (groupStartDate && groupEndDate) {
       // Timestamp group, cannot manually add
-      return res.status(400).json({ message: "Cannot manually add students to timestamp-based groups" });
+      return res
+        .status(400)
+        .json({
+          message: "Cannot manually add students to timestamp-based groups",
+        });
     }
 
     // College automatic group from groups table
@@ -411,12 +449,14 @@ export const addUserToGroup = async (req, res) => {
       `UPDATE users
        SET headline = $1
        WHERE user_id = $2 AND role = 'student' AND status = 'active'`,
-      [groupName, userId]
+      [groupName, userId],
     );
     if (updateResult.rowCount === 0) {
       return res
         .status(400)
-        .json({ message: "Only active students can be added to college groups" });
+        .json({
+          message: "Only active students can be added to college groups",
+        });
     }
     return res.status(200).json({ message: "Student added to college group" });
   } catch (error) {
@@ -430,39 +470,65 @@ export const removeUserFromGroup = async (req, res) => {
 
   try {
     // Check if group is college group
-    const groupCheck = await pool.query(`SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`, [groupId]);
+    const groupCheck = await pool.query(
+      `SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`,
+      [groupId],
+    );
     if (groupCheck.rows.length === 0) {
       // Check college view
       try {
-        await pool.query('SELECT 1 FROM college_groups LIMIT 1');
-        const collegeCheck = await pool.query(`SELECT group_name FROM college_groups WHERE group_id = $1`, [groupId]);
+        await pool.query("SELECT 1 FROM college_groups LIMIT 1");
+        const collegeCheck = await pool.query(
+          `SELECT group_name FROM college_groups WHERE group_id = $1`,
+          [groupId],
+        );
         if (collegeCheck.rows.length === 0) {
           return res.status(404).json({ message: "Group not found" });
         }
         // It's college group from view
-        await pool.query(`UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`, [userId]);
-        return res.status(200).json({ message: "Student removed from college group" });
+        await pool.query(
+          `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`,
+          [userId],
+        );
+        return res
+          .status(200)
+          .json({ message: "Student removed from college group" });
       } catch (e) {
         console.log("College groups view not available:", e.message);
-        return res.status(400).json({ message: "College groups not supported" });
+        return res
+          .status(400)
+          .json({ message: "College groups not supported" });
       }
     }
 
     const { created_by, start_date, end_date } = groupCheck.rows[0];
     if (created_by || (start_date && !end_date)) {
       // Manual or college manual group
-      await pool.query(`DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`, [groupId, userId]);
+      await pool.query(
+        `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
+        [groupId, userId],
+      );
       return res.status(200).json({ message: "Student removed from group" });
     }
 
     if (start_date && end_date) {
       // Timestamp group, cannot manually remove
-      return res.status(400).json({ message: "Cannot manually remove students from timestamp-based groups" });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Cannot manually remove students from timestamp-based groups",
+        });
     }
 
     // College automatic group from groups table
-    await pool.query(`UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`, [userId]);
-    return res.status(200).json({ message: "Student removed from college group" });
+    await pool.query(
+      `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student'`,
+      [userId],
+    );
+    return res
+      .status(200)
+      .json({ message: "Student removed from college group" });
   } catch (error) {
     console.error("removeUserFromGroup error:", error);
     res.status(500).json({ message: "Server error" });
@@ -483,7 +549,7 @@ export const updateGroup = async (req, res) => {
     // First, check if this is a regular group row
     const groupCheck = await pool.query(
       `SELECT created_by, start_date, end_date FROM groups WHERE group_id = $1`,
-      [groupId]
+      [groupId],
     );
 
     if (groupCheck.rows.length > 0) {
@@ -491,7 +557,7 @@ export const updateGroup = async (req, res) => {
       // Check if another group with same name exists
       const existingNameCheck = await pool.query(
         `SELECT group_id FROM groups WHERE UPPER(group_name) = $1 AND group_id != $2`,
-        [normalizedName, groupId]
+        [normalizedName, groupId],
       );
 
       if (existingNameCheck.rows.length > 0) {
@@ -537,7 +603,7 @@ export const updateGroup = async (req, res) => {
              created_by = $4
          WHERE group_id = $5
          RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
-        [normalizedName, newStartDate, newEndDate, newCreatedBy, groupId]
+        [normalizedName, newStartDate, newEndDate, newCreatedBy, groupId],
       );
 
       if (result.rows.length === 0) {
@@ -553,7 +619,7 @@ export const updateGroup = async (req, res) => {
       const collegeResult = await pool.query(
         `SELECT group_id, group_name, start_date, end_date, created_at
          FROM college_groups WHERE group_id = $1`,
-        [groupId]
+        [groupId],
       );
 
       if (collegeResult.rows.length === 0) {
@@ -584,16 +650,18 @@ export const deleteGroup = async (req, res) => {
     // First check if this is a regular group row
     const groupCheck = await pool.query(
       `SELECT group_id FROM groups WHERE group_id = $1`,
-      [groupId]
+      [groupId],
     );
 
     if (groupCheck.rows.length > 0) {
       // Regular group: remove memberships then delete group
-      await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [groupId]);
+      await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [
+        groupId,
+      ]);
 
       const result = await pool.query(
         `DELETE FROM groups WHERE group_id = $1 RETURNING group_id`,
-        [groupId]
+        [groupId],
       );
 
       if (result.rows.length === 0) {
@@ -608,7 +676,7 @@ export const deleteGroup = async (req, res) => {
       await pool.query("SELECT 1 FROM college_groups LIMIT 1");
       const collegeCheck = await pool.query(
         `SELECT group_name FROM college_groups WHERE group_id = $1`,
-        [groupId]
+        [groupId],
       );
 
       if (collegeCheck.rows.length === 0) {
@@ -624,7 +692,7 @@ export const deleteGroup = async (req, res) => {
          SET headline = NULL
          WHERE headline = $1
            AND role = 'student'`,
-        [collegeName]
+        [collegeName],
       );
 
       return res
