@@ -2,7 +2,7 @@ console.log("certificateRoutes.js loaded");
 
 import express from "express";
 import pool from "../db/postgres.js";
-import { generateCertificate, generateQuizCertificate } from "../controllers/certificateController.js";
+import { generateCertificate, generateQuizCertificate } from "../controllers/certificate.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 
