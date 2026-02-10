@@ -7,7 +7,7 @@ import { issueExamCertificate } from "../certificate.controller.js";
 export const getExamSubmissions = async (req, res) => {
   try {
     const { examId } = req.params;
-    const instructorId = req.user.user_id;
+    const instructorId = req.user.id;
 
     // Verify exam ownership
     const examCheck = await pool.query(

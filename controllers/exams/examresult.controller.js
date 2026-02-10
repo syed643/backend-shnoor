@@ -8,7 +8,7 @@ import pool from "../../db/postgres.js";
  */
 export const getMyExamResults = async (req, res) => {
   try {
-    const studentId = req.user.user_id;
+    const studentId = req.user.id;
 
     const { rows } = await pool.query(
       `
@@ -46,7 +46,7 @@ export const getMyExamResults = async (req, res) => {
  */
 export const getMyExamResultByExam = async (req, res) => {
   try {
-    const studentId = req.user.user_id;
+    const studentId = req.user.id;
     const { examId } = req.params;
 
     const { rows } = await pool.query(
@@ -89,7 +89,7 @@ export const getMyExamResultByExam = async (req, res) => {
  */
 export const getExamResultsForInstructor = async (req, res) => {
   try {
-    const instructorId = req.user.user_id;
+    const instructorId = req.user.id;
     const { examId } = req.params;
 
     // 🔐 Ensure exam belongs to instructor
