@@ -5,11 +5,8 @@ export const getMyNotifications = async (req, res) => {
     try {
         // Support both `user_id` and `id` properties on req.user
         const userId = req.user?.user_id || req.user?.id;
-        console.log("NOTIF_DEBUG: req.user is", req.user);
-        console.log("NOTIF_DEBUG: Fetching notifications for userId:", userId);
 
         if (!userId) {
-            console.warn("NOTIF_DEBUG: No user id found on req.user");
             return res.json([]);
         }
 
