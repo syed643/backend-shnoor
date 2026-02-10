@@ -356,6 +356,12 @@ export const exploreCourses = async (req, res) => {
       FROM courses c
       LEFT JOIN users u ON u.user_id = c.instructor_id
       WHERE c.status = 'approved'
+      AND EXISTS (
+        SELECT 1
+        FROM course_assignments ca
+        WHERE ca.course_id = c.courses_id
+          AND ca.student_id = $1
+      )
       AND c.courses_id NOT IN (
         SELECT course_id
         FROM student_courses
