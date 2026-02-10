@@ -24,6 +24,10 @@ import { initChatTables, serveFile } from "./controllers/chat.controller.js";
 import botRoutes from "./routes/bot.routes.js";
 import reviewroutes from "./routes/reviews.routes.js"
 import certificateRoutes from "./routes/certificate.routes.js"
+import contestRoutes from "./routes/contest.routes.js";
+import contestQuestionRoutes from "./routes/contestQuestion.routes.js";
+import contestAdvancedRoutes from "./routes/contestAdvanced.routes.js";
+
 const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
@@ -72,6 +76,9 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/bot", botRoutes); // For bot media uploads
 app.use("/api/reviews",reviewroutes) // For instructor reviews
 app.use("/api/certificate",certificateRoutes)
+app.use("/api/contests", contestRoutes)
+app.use("/api/contests", contestQuestionRoutes);
+app.use("/api/contests", contestAdvancedRoutes);
 
 
 app.get("/", (req, res) => {
