@@ -26,8 +26,10 @@ export const submitExam = async (req, res) => {
 
     const questionMap = {};
     questions.forEach((q) => {
-      questionMap[q.question_id] = q;
-      totalMarks += q.marks;
+      if (q.question_type === "mcq" || q.question_type === "descriptive") {
+        questionMap[q.question_id] = q;
+        totalMarks += q.marks;
+      }
     });
 
     for (const ans of answers) {
@@ -67,7 +69,6 @@ export const submitExam = async (req, res) => {
         );
       }
 
-
       if (question.question_type === "descriptive") {
         await client.query(
           `
@@ -78,17 +79,7 @@ export const submitExam = async (req, res) => {
           [examId, ans.question_id, studentId, ans.answer_text]
         );
       }
-
-      if (question.question_type === "coding") {
-        await client.query(
-          `
-          INSERT INTO exam_answers
-            (exam_id, question_id, student_id, code_submission, marks_obtained)
-          VALUES ($1, $2, $3, $4, NULL)
-          `,
-          [examId, ans.question_id, studentId, ans.code]
-        );
-      }
+      // Coding submissions are ignored for now.
     }
 
     const percentage =

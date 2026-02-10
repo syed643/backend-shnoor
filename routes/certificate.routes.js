@@ -2,7 +2,10 @@ console.log("certificateRoutes.js loaded");
 
 import express from "express";
 import pool from "../db/postgres.js";
-import { generateCertificate, generateQuizCertificate } from "../controllers/certificate.controller.js";
+import {
+  generateQuizCertificate,
+  issueExamCertificate
+} from "../controllers/certificate.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 
@@ -22,35 +25,54 @@ router.post("/add", async (req, res) => {
       });
     }
 
-    // score condition (allow 50 and above)
-    if (Number(score) < 50) {
+    const examRes = await pool.query(
+      `SELECT exam_id FROM exams WHERE title = $1`,
+      [exam_name]
+    );
+
+    if (examRes.rows.length === 0) {
+      return res.status(404).json({ message: "Exam not found" });
+    }
+
+    const exam_id = examRes.rows[0].exam_id;
+
+    const certificateResult = await issueExamCertificate({
+      userId: user_id,
+      examId: exam_id,
+      score
+    });
+
+    if (!certificateResult.issued) {
+      const reason = certificateResult.reason || "not_eligible";
+      const messageMap = {
+        coding_present: "Coding questions are not eligible for certificates yet",
+        not_passed: "Score below pass percentage. Certificate not eligible.",
+        already_issued: "Certificate already issued for this exam",
+        pdf_failed: "PDF generation failed"
+      };
+
       return res.status(400).json({
-        message: "Score is less than or equal to 50, certificate not generated",
         generated: false,
+        message: messageMap[reason] || "Certificate not eligible"
       });
     }
 
-    // Insert certificate data
-    const result = await pool.query(
-      `INSERT INTO certificates (user_id, exam_name, score, certificate_id)   
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [user_id, exam_name, score, certificate_id || null]
-    );
-
-    // PDF generate
-    console.log("Certificate data inserted");
-    // call controller function to generate PDF
-    if (typeof generateCertificate === 'function') {
-      await generateCertificate(user_id);
-    } else {
-      console.error('generateCertificate not available');
+    if (certificate_id) {
+      await pool.query(
+        `
+        UPDATE certificates
+        SET certificate_id = $1
+        WHERE user_id = $2 AND exam_id = $3
+        `,
+        [certificate_id, user_id, exam_id]
+      );
     }
 
     res.status(201).json({
-      message: "Certificate data saved successfully",
+      message: "Certificate generated successfully",
       generated: true,
-      data: result.rows[0],
+      data: certificateResult.certificate,
+      filePath: certificateResult.filePath
     });
   } catch (err) {
     console.error("POST /add error:", err.message);

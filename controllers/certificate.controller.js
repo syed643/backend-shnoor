@@ -51,6 +51,95 @@ const generateCertificate = async (user_id) => {
   }
 };
 
+const issueExamCertificate = async ({ userId, examId, score }) => {
+  if (!userId || !examId || score === undefined) {
+    return { issued: false, reason: "invalid_input" };
+  }
+
+  const examRes = await pool.query(
+    `SELECT exam_id, title, pass_percentage FROM exams WHERE exam_id = $1`,
+    [examId]
+  );
+
+  if (examRes.rows.length === 0) {
+    return { issued: false, reason: "exam_not_found" };
+  }
+
+  const exam = examRes.rows[0];
+  const passPercentage = Number(exam.pass_percentage);
+  const numericScore = Number(score);
+
+  if (Number.isNaN(numericScore)) {
+    return { issued: false, reason: "invalid_score" };
+  }
+
+  const codingCheck = await pool.query(
+    `
+    SELECT 1
+    FROM exam_questions
+    WHERE exam_id = $1 AND question_type = 'coding'
+    LIMIT 1
+    `,
+    [examId]
+  );
+
+  if (codingCheck.rows.length > 0) {
+    return { issued: false, reason: "coding_present" };
+  }
+
+  if (numericScore < passPercentage) {
+    return { issued: false, reason: "not_passed" };
+  }
+
+  const existingCert = await pool.query(
+    `SELECT 1 FROM certificates WHERE user_id = $1 AND exam_id = $2`,
+    [userId, examId]
+  );
+
+  if (existingCert.rows.length > 0) {
+    return { issued: false, reason: "already_issued" };
+  }
+
+  const userRes = await pool.query(
+    `SELECT full_name FROM users WHERE user_id = $1`,
+    [userId]
+  );
+
+  const studentName = userRes.rows[0]?.full_name || null;
+
+  const pdfResult = await generatePDF(
+    exam.title,
+    numericScore,
+    userId,
+    numericScore,
+    studentName
+  );
+
+  if (!pdfResult?.generated) {
+    return { issued: false, reason: "pdf_failed" };
+  }
+
+  const certificateId = pdfResult.filePath
+    ? path.basename(pdfResult.filePath)
+    : null;
+
+  const insertRes = await pool.query(
+    `
+    INSERT INTO certificates
+      (user_id, exam_id, exam_name, score, certificate_id, issued_at)
+    VALUES ($1, $2, $3, $4, $5, NOW())
+    RETURNING *
+    `,
+    [userId, examId, exam.title, numericScore, certificateId]
+  );
+
+  return {
+    issued: true,
+    certificate: insertRes.rows[0],
+    filePath: pdfResult.filePath || null
+  };
+};
+
 
 const generateQuizCertificate = async (req, res) => {
   try {
@@ -75,14 +164,14 @@ const generateQuizCertificate = async (req, res) => {
 
     const score = Number(percentage);
 
-    if (isNaN(score) || score < 50) {
+    if (isNaN(score)) {
       return res.status(400).json({
-        message: "Score below 50%. Certificate not eligible."
+        message: "Invalid score"
       });
     }
 
     const examRes = await pool.query(
-      `SELECT id FROM exams WHERE exam_name = $1`,
+      `SELECT exam_id FROM exams WHERE title = $1`,
       [exam_name]
     );
 
@@ -90,52 +179,34 @@ const generateQuizCertificate = async (req, res) => {
       return res.status(404).json({ message: "Exam not found" });
     }
 
-    const exam_id = examRes.rows[0].id;
+    const exam_id = examRes.rows[0].exam_id;
 
-    /* -------- Prevent duplicate certificates -------- */
-    const existingCert = await pool.query(
-      `SELECT 1 FROM certificates WHERE user_id = $1 AND exam_id = $2`,
-      [user_id, exam_id]
-    );
+    const certificateResult = await issueExamCertificate({
+      userId: user_id,
+      examId: exam_id,
+      score
+    });
 
-    if (existingCert.rows.length > 0) {
-      return res.status(409).json({
-        message: "Certificate already issued for this exam"
-      });
-    }
+    if (!certificateResult.issued) {
+      const reason = certificateResult.reason || "not_eligible";
+      const messageMap = {
+        coding_present: "Coding questions are not eligible for certificates yet",
+        not_passed: "Score below pass percentage. Certificate not eligible.",
+        already_issued: "Certificate already issued for this exam",
+        pdf_failed: "PDF generation failed"
+      };
 
-    /* -------- Generate PDF -------- */
-    const pdfResult = await generatePDF(
-      exam_name,
-      score,
-      user_id,
-      score,
-      full_name
-    );
-
-    if (!pdfResult?.generated) {
-      return res.status(500).json({
+      return res.status(400).json({
         success: false,
-        message: "PDF generation failed"
+        message: messageMap[reason] || "Certificate not eligible"
       });
     }
-
-    const certificateId = path.basename(pdfResult.filePath);
-
-    const insertRes = await pool.query(
-      `
-      INSERT INTO certificates (user_id, exam_id, certificate_id, issued_at)
-      VALUES ($1, $2, $3, NOW())
-      RETURNING *
-      `,
-      [user_id, exam_id, certificateId]
-    );
 
     return res.status(200).json({
       success: true,
       message: "Certificate generated successfully",
-      filePath: pdfResult.filePath,
-      certificate: insertRes.rows[0]
+      filePath: certificateResult.filePath,
+      certificate: certificateResult.certificate
     });
 
   } catch (err) {
@@ -150,5 +221,6 @@ const generateQuizCertificate = async (req, res) => {
 
 export {
   generateCertificate,
+  issueExamCertificate,
   generateQuizCertificate
 };

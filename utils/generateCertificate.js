@@ -1,39 +1,69 @@
 import PDFDocument from "pdfkit";
+import fs from "fs";
+import path from "path";
 
 const generatePDF = (
-  res,
-  exam_name,
+  resOrExamName,
+  examName,
   score,
-  user_id,
+  userId,
   percentage = null,
-  student_name = null
+  studentName = null
 ) => {
-  const numericScore = Number(score);
-  const numericPercentage = percentage ? Number(percentage) : null;
+  const hasResponse =
+    resOrExamName && typeof resOrExamName.setHeader === "function";
+
+  const res = hasResponse ? resOrExamName : null;
+  const exam_name = hasResponse ? examName : resOrExamName;
+  const scoreValue = hasResponse ? score : examName;
+  const user_id = hasResponse ? userId : score;
+  const percentageValue = hasResponse ? percentage : userId;
+  const student_name = hasResponse ? studentName : percentage;
+
+  const numericScore = Number(scoreValue);
+  const numericPercentage =
+    percentageValue !== null && percentageValue !== undefined
+      ? Number(percentageValue)
+      : null;
 
   if (
-    (isNaN(numericScore) || numericScore < 50) &&
-    (numericPercentage === null || numericPercentage < 50)
+    isNaN(numericScore) &&
+    (numericPercentage === null || isNaN(numericPercentage))
   ) {
-    return res.status(400).json({
-      success: false,
-      message: "Not eligible for certificate"
-    });
-  }
+    if (res) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid score"
+      });
+    }
 
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename=certificate_${user_id}.pdf`
-  );
+    return { generated: false, message: "Invalid score" };
+  }
 
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 72, bottom: 72, left: 72, right: 72 }
   });
 
-  // Pipe directly to response
-  doc.pipe(res);
+  let outputStream = null;
+  let filePath = null;
+
+  if (res) {
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=certificate_${user_id}.pdf`
+    );
+    outputStream = res;
+  } else {
+    const certDir = path.join(process.cwd(), "certificates");
+    fs.mkdirSync(certDir, { recursive: true });
+    const fileName = `certificate_${user_id}_${Date.now()}.pdf`;
+    filePath = path.join(certDir, fileName);
+    outputStream = fs.createWriteStream(filePath);
+  }
+
+  doc.pipe(outputStream);
 
 
   // Border
@@ -92,6 +122,18 @@ const generatePDF = (
   doc.moveTo(380, 710).lineTo(540, 710).stroke();
 
   doc.end();
+
+  if (res) {
+    return { generated: true };
+  }
+
+  return new Promise((resolve, reject) => {
+    outputStream.on("finish", () =>
+      resolve({ generated: true, filePath })
+    );
+    outputStream.on("error", (err) => reject(err));
+    doc.on("error", (err) => reject(err));
+  });
 };
 
 export default generatePDF;

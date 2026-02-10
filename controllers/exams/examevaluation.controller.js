@@ -1,4 +1,5 @@
 import pool from "../../db/postgres.js";
+import { issueExamCertificate } from "../certificate.controller.js";
 
 /**
  * Instructor: Get all submissions for an exam
@@ -79,28 +80,9 @@ export const evaluateDescriptiveAnswer = async (req, res) => {
  * Instructor: Evaluate coding answer (manual)
  */
 export const evaluateCodingAnswer = async (req, res) => {
-  try {
-    const { answerId } = req.params;
-    const { marks } = req.body;
-
-    if (marks === undefined) {
-      return res.status(400).json({ message: "Marks required" });
-    }
-
-    await pool.query(
-      `
-      UPDATE exam_answers
-      SET marks_obtained = $1
-      WHERE answer_id = $2
-      `,
-      [marks, answerId]
-    );
-
-    res.json({ message: "Coding answer evaluated" });
-  } catch (error) {
-    console.error("Evaluate coding error:", error);
-    res.status(500).json({ message: "Evaluation failed" });
-  }
+  return res.status(501).json({
+    message: "Coding evaluation is disabled for now"
+  });
 };
 
 /**
@@ -121,6 +103,7 @@ export const finalizeExamResult = async (req, res) => {
         ON eq.question_id = ea.question_id
         AND ea.student_id = $2
       WHERE eq.exam_id = $1
+        AND eq.question_type IN ('mcq', 'descriptive')
       `,
       [examId, studentId]
     );
@@ -163,12 +146,37 @@ export const finalizeExamResult = async (req, res) => {
       ]
     );
 
+    let certificateIssued = false;
+    let certificateInfo = null;
+
+    if (passed) {
+      try {
+        const certificateResult = await issueExamCertificate({
+          userId: studentId,
+          examId,
+          score: percentage
+        });
+
+        if (certificateResult.issued) {
+          certificateIssued = true;
+          certificateInfo = {
+            certificate: certificateResult.certificate,
+            filePath: certificateResult.filePath
+          };
+        }
+      } catch (certificateError) {
+        console.error("Certificate issuance error:", certificateError);
+      }
+    }
+
     res.json({
       message: "Exam result finalized",
       totalMarks,
       obtainedMarks,
       percentage,
-      passed
+      passed,
+      certificateIssued,
+      certificateInfo
     });
   } catch (error) {
     console.error("Finalize exam error:", error);
