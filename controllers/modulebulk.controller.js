@@ -52,9 +52,36 @@ export const bulkUploadModules = async (req, res) => {
             const row = results[i];
             const rowNum = i + 2; // CSV header is row 1
 
-            // Basic Validation
-            if (!row.module_name || !row.module_type) {
-                errors.push({ row: rowNum, message: "Missing module_name or module_type" });
+            // Smart Column Realignment: Check for URLs in wrong columns (common in malformed CSVs)
+            if (!row.module_source || !row.module_source.includes('http')) {
+                const urlRegex = /(http|https):\/\/[^ "]+$/;
+
+                // Check module_type
+                if (row.module_type && urlRegex.test(row.module_type)) {
+                    row.module_source = row.module_type;
+                    row.module_type = ""; // Will be inferred later
+                }
+                // Check module_duration
+                else if (row.module_duration && urlRegex.test(row.module_duration)) {
+                    row.module_source = row.module_duration;
+                    row.module_duration = 0;
+                }
+                // Check module_name (extreme case, but happens)
+                else if (row.module_name && urlRegex.test(row.module_name) && !row.module_source) {
+                    // If name is the URL, we likely lost the name. 
+                    // Use the filename/end of URL as name if helpful, or keep generic.
+                    row.module_source = row.module_name;
+                    row.module_name = "Untitled Module";
+                }
+            }
+
+            // Basic Validation - Relaxed: Allow missing type if we have a source to infer from
+            if (!row.module_name) {
+                errors.push({ row: rowNum, message: "Missing module_name" });
+                continue;
+            }
+            if (!row.module_type && !row.module_source) {
+                errors.push({ row: rowNum, message: "Missing module_type and no source to infer from" });
                 continue;
             }
 
@@ -68,8 +95,26 @@ export const bulkUploadModules = async (req, res) => {
             else if (type.includes('pdf')) normalizedType = 'pdf';
 
             if (!validTypes.includes(normalizedType)) {
-                errors.push({ row: rowNum, message: `Invalid module_type: ${row.module_type}` });
-                continue;
+                // Try to infer from module_source if type is invalid or missing
+                const source = (row.module_source || "").toLowerCase();
+                if (source.includes('gamma.app')) normalizedType = 'video';
+                else if (source.includes('youtube.com') || source.includes('youtu.be')) normalizedType = 'video';
+                else if (source.includes('.pdf')) normalizedType = 'pdf';
+                else if (source.includes('.mp4') || source.includes('.webm')) normalizedType = 'video';
+                else if (source.includes('.txt') || source.includes('.html')) normalizedType = 'text_stream';
+
+                if (!validTypes.includes(normalizedType)) {
+                    errors.push({ row: rowNum, message: `Invalid module_type: ${row.module_type}` });
+                    continue;
+                }
+            } else {
+                // Priority detection: Even if they said 'pdf', if it's Gamma/YouTube, it should be 'video' for proper embedding
+                const source = (row.module_source || "").toLowerCase();
+                if (source.includes('gamma.app') || source.includes('youtube.com') || source.includes('youtu.be')) {
+                    normalizedType = 'video';
+                } else if (source.includes('.pdf') && normalizedType !== 'pdf') {
+                    normalizedType = 'pdf';
+                }
             }
 
             // Source Handling
