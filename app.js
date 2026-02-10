@@ -62,6 +62,8 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/admin/groups", groupsRoutes);
 app.use("/api/student", studentCoursesRoutes);
 app.use("/api/exams", examRoutes);
+// Backward-compatible alias for older frontend routes
+app.use("/api/exam", examRoutes);
 app.use("/api/student/exams", studentExamRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/practice", practiceRoutes);
