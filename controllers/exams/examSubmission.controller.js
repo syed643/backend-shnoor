@@ -78,6 +78,12 @@ export const submitExam = async (req, res) => {
           }
         }
 
+        if (!optionIdToStore) {
+          const err = new Error("MCQ option not found");
+          err.status = 400;
+          throw err;
+        }
+
         const { rows } = await client.query(
           `
           SELECT is_correct
@@ -158,7 +164,10 @@ export const submitExam = async (req, res) => {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Submit exam error:", err);
-    res.status(500).json({ message: "Failed to submit exam" });
+    const status = err.status || 500;
+    res.status(status).json({
+      message: err.status ? err.message : "Failed to submit exam"
+    });
   } finally {
     client.release();
   }
