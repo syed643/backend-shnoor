@@ -7,9 +7,24 @@ export const submitExam = async (req, res) => {
     const studentId = req.user.user_id;
     const { answers } = req.body;
 
-    if (!answers || !Array.isArray(answers) || answers.length === 0) {
+    const isArrayAnswers = Array.isArray(answers);
+    const isObjectAnswers =
+      answers && typeof answers === "object" && !Array.isArray(answers);
+
+    if (
+      !answers ||
+      (isArrayAnswers && answers.length === 0) ||
+      (isObjectAnswers && Object.keys(answers).length === 0)
+    ) {
       return res.status(400).json({ message: "No answers submitted" });
     }
+
+    const normalizedAnswers = isArrayAnswers
+      ? answers
+      : Object.entries(answers).map(([questionId, value]) => ({
+          question_id: questionId,
+          value
+        }));
 
     await client.query("BEGIN");
 
@@ -32,23 +47,47 @@ export const submitExam = async (req, res) => {
       }
     });
 
-    for (const ans of answers) {
+    for (const ans of normalizedAnswers) {
       const question = questionMap[ans.question_id];
       if (!question) continue;
 
       let marksObtained = 0;
 
       if (question.question_type === "mcq") {
+        const selectedOptionId = ans.selected_option_id ?? null;
+        const selectedOptionText =
+          ans.selected_option_text ?? ans.value ?? ans.selected_option ?? null;
+        let optionIdToStore = selectedOptionId;
+
+        if (!optionIdToStore && selectedOptionText) {
+          const optionLookup = await client.query(
+            `
+            SELECT option_id, is_correct
+            FROM exam_mcq_options
+            WHERE question_id = $1 AND option_text = $2
+            `,
+            [ans.question_id, String(selectedOptionText).trim()]
+          );
+
+          if (optionLookup.rows.length) {
+            optionIdToStore = optionLookup.rows[0].option_id;
+            if (optionLookup.rows[0].is_correct) {
+              marksObtained = question.marks;
+              obtainedMarks += marksObtained;
+            }
+          }
+        }
+
         const { rows } = await client.query(
           `
           SELECT is_correct
           FROM exam_mcq_options
           WHERE option_id = $1
           `,
-          [ans.selected_option_id]
+          [optionIdToStore]
         );
 
-        if (rows.length && rows[0].is_correct) {
+        if (!marksObtained && rows.length && rows[0].is_correct) {
           marksObtained = question.marks;
           obtainedMarks += marksObtained;
         }
@@ -63,20 +102,22 @@ export const submitExam = async (req, res) => {
             examId,
             ans.question_id,
             studentId,
-            ans.selected_option_id,
+            optionIdToStore,
             marksObtained,
           ]
         );
       }
 
       if (question.question_type === "descriptive") {
+        const answerText =
+          ans.answer_text ?? ans.value ?? ans.text ?? ans.response ?? "";
         await client.query(
           `
           INSERT INTO exam_answers
             (exam_id, question_id, student_id, answer_text, marks_obtained)
           VALUES ($1, $2, $3, $4, NULL)
           `,
-          [examId, ans.question_id, studentId, ans.answer_text]
+          [examId, ans.question_id, studentId, answerText]
         );
       }
       // Coding submissions are ignored for now.
