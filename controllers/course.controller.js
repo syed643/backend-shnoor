@@ -424,7 +424,7 @@ export const bulkUploadCourses = async (req, res) => {
                     validity: row.validity,
                     description: row.description,
                     thumbnail_url: row.thumbnail_url,
-                    pricing_type: row.pricing_type,
+                    price_type: row.price_type,
                   },
                   modules: [],
                 };
@@ -449,7 +449,7 @@ export const bulkUploadCourses = async (req, res) => {
 
                 await client.query("BEGIN");
                 try {
-                  const isPaid = details.pricing_type?.toLowerCase() === "paid";
+                  const isPaid = details.price_type?.toLowerCase() === "paid";
                   let difficulty = details.level || "Beginner";
                   difficulty = difficulty.charAt(0).toUpperCase() + difficulty.slice(1).toLowerCase();
                   if (!["Beginner", "Intermediate", "Advanced"].includes(difficulty)) {
@@ -466,7 +466,7 @@ export const bulkUploadCourses = async (req, res) => {
                     INSERT INTO courses (
                       instructor_id, title, description, category, thumbnail_url, 
                       difficulty, status, validity_value, validity_unit, expires_at, 
-                      pricing_type, price_inr
+                      price_type, price_amount
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ${expiresAtFragment}, $10, $11)
                     RETURNING courses_id
                   `;
