@@ -5,6 +5,11 @@ export const submitExam = async (req, res) => {
   try {
     const { examId } = req.params;
     const studentId = req.user.user_id;
+    if (!studentId) {
+  return res.status(401).json({
+    message: "Unauthorized: student ID not found"
+  });
+}
     const { answers } = req.body;
 
     const isArrayAnswers = Array.isArray(answers);
