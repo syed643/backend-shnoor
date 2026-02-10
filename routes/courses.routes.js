@@ -9,12 +9,14 @@ import {
   getApprovedCoursesForInstructor,
   getInstructorCourseStats,
   getCourseById,
-  exploreCourses
+  exploreCourses,
+  bulkUploadCourses
 } from "../controllers/course.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
+import uploadCsv from "../middlewares/uploadCsv.js";
 
 const router = express.Router();
 
@@ -27,7 +29,6 @@ router.post(
   addCourse
 );
 
-
 router.get(
   "/instructor",
   firebaseAuth,
@@ -35,7 +36,6 @@ router.get(
   roleGuard("instructor"),
   getInstructorCourses
 );
-
 
 router.get(
   "/pending",
@@ -45,7 +45,6 @@ router.get(
   getPendingCourses
 );
 
-
 router.patch(
   "/:courseId/approve",
   firebaseAuth,
@@ -53,7 +52,6 @@ router.patch(
   roleGuard("admin"),
   approveCourse
 );
-
 
 router.get(
   "/approved",
@@ -101,5 +99,13 @@ router.get(
   getCourseById
 );
 
+router.post(
+  "/bulk-upload",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  uploadCsv.single("file"),
+  bulkUploadCourses
+);
 
 export default router;

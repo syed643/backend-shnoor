@@ -3,13 +3,17 @@ import {
   addModules,
   getModulesByCourse,
   deleteModule,
-  getModulePdf
+  getModulePdf,
+  getModuleStream,
+  advanceModuleStream
 } from "../controllers/moduleController.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
 import uploadPdf from "../middlewares/uploadPdf.js";
+import { uploadBulk } from "../middlewares/uploadBulk.js";
+import { bulkUploadModules } from "../controllers/modulebulk.controller.js";
 
 const router = express.Router();
 
@@ -43,4 +47,28 @@ router.get(
   getModulePdf
 );
 
+router.get(
+  "/modules/:moduleId/stream",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner", "instructor"),
+  getModuleStream
+);
+
+router.post(
+  "/modules/:moduleId/stream/next",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner", "instructor"),
+  advanceModuleStream
+);
+
+router.post(
+  "/modules/bulk-upload",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  uploadBulk,
+  bulkUploadModules
+);
 export default router;
