@@ -18,6 +18,7 @@ export const getMyProfile = async (req, res) => {
         linkedin,
         github,
         photo_url AS "photoURL",
+        college,
         created_at
       FROM users
       WHERE user_id = $1
@@ -126,7 +127,7 @@ export const updateUserStatus = async (req, res) => {
 };
 
 export const updateMyProfile = async (req, res) => {
-  const { displayName, bio, headline, linkedin, github, photoURL } = req.body;
+  const { displayName, bio, headline, linkedin, github, photoURL,college } = req.body;
 
   try {
     await pool.query(
@@ -138,10 +139,11 @@ export const updateMyProfile = async (req, res) => {
         linkedin = $4,
         github = $5,
         photo_url = $6,
+        college = $7,
         updated_at = NOW()
-      WHERE user_id = $7
+      WHERE user_id = $8
       `,
-      [displayName, bio, headline, linkedin, github, photoURL, req.user.id],
+      [displayName, bio, headline, linkedin, github, photoURL, college, req.user.id],
     );
 
     res.status(200).json({ message: "Profile updated successfully" });

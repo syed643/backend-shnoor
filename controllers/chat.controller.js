@@ -5,13 +5,9 @@ export const initChatTables = async () => {
   try {
     await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
 
-    console.log("Re-initializing Chat Schemas (UUID Mode)...");
-    // Drop tables to fix schema mismatches
-    await pool.query(`DROP TABLE IF EXISTS messages CASCADE;`);
-    await pool.query(`DROP TABLE IF EXISTS chats CASCADE;`);
-    await pool.query(`DROP TABLE IF EXISTS files CASCADE;`);
+    console.log("Initializing Chat Schemas...");
 
-    // Files Table (SERIAL is fine for files, internal ID)
+    // Files Table
     await pool.query(`
             CREATE TABLE IF NOT EXISTS files (
                 file_id SERIAL PRIMARY KEY,
@@ -22,7 +18,32 @@ export const initChatTables = async () => {
             );
         `);
 
-    // Chats Table - Using UUID for user_id references (Fix for type mismatch)
+    // Groups Table
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS groups (
+                group_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                college TEXT NOT NULL,
+                creator_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+                meeting_link TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+    // Group Members Table
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS group_members (
+                group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+                user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                role TEXT DEFAULT 'member',
+                PRIMARY KEY (group_id, user_id)
+            );
+        `);
+
+    // Chats Table (1-on-1)
     await pool.query(`
             CREATE TABLE IF NOT EXISTS chats (
                 chat_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -38,19 +59,54 @@ export const initChatTables = async () => {
     await pool.query(`
             CREATE TABLE IF NOT EXISTS messages (
                 message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                chat_id UUID NOT NULL REFERENCES chats(chat_id) ON DELETE CASCADE,
+                chat_id UUID REFERENCES chats(chat_id) ON DELETE CASCADE,
+                group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
                 sender_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                receiver_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                receiver_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
                 text TEXT NOT NULL,
                 attachment_file_id INT REFERENCES files(file_id),
                 attachment_type VARCHAR(50),
                 attachment_name TEXT,
                 is_read BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT at_least_one_destination CHECK (chat_id IS NOT NULL OR group_id IS NOT NULL)
             );
         `);
 
-    console.log("✅ Chat tables initialized successfully (UUIDs)");
+    // Migration/Alter updates for existing tables
+    const alterQueries = [
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE",
+      "ALTER TABLE messages ALTER COLUMN chat_id DROP NOT NULL",
+      "ALTER TABLE messages ALTER COLUMN receiver_id DROP NOT NULL",
+      "ALTER TABLE groups ADD COLUMN IF NOT EXISTS meeting_link TEXT",
+      "ALTER TABLE groups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE",
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE",
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_message_id UUID REFERENCES messages(message_id) ON DELETE SET NULL",
+    ];
+
+    // Reactions Table
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS message_reactions (
+                reaction_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                message_id UUID REFERENCES messages(message_id) ON DELETE CASCADE,
+                user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+                emoji TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (message_id, user_id)
+            );
+        `);
+
+    for (const q of alterQueries) {
+      try {
+        await pool.query(q);
+      } catch (e) {
+        // Ignore if already changed or complex
+      }
+    }
+
+    console.log("✅ Chat and Group tables initialized successfully");
   } catch (err) {
     console.error("❌ Error initializing chat tables:", err);
   }
@@ -105,16 +161,28 @@ export const getMessages = async (req, res) => {
     const result = await pool.query(
       `
             SELECT 
-                m.*,
+                m.*, 
                 u.firebase_uid as sender_uid,
-                u.full_name as sender_name
+                u.full_name as sender_name, 
+                u.photo_url as sender_photo,
+                pm.text as parent_message_text,
+                pu.full_name as parent_message_sender_name,
+                (
+                    SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id, 'user_name', ru.full_name))
+                    FROM message_reactions mr
+                    JOIN users ru ON mr.user_id = ru.user_id
+                    WHERE mr.message_id = m.message_id
+                ) as reactions
             FROM messages m
             JOIN users u ON m.sender_id = u.user_id
+            LEFT JOIN messages pm ON m.reply_to_message_id = pm.message_id
+            LEFT JOIN users pu ON pm.sender_id = pu.user_id
             WHERE m.chat_id = $1
             ORDER BY m.created_at ASC
         `,
       [chatId],
     );
+
     const baseUrl = process.env.BACKEND_URL;
     const messages = result.rows.map((msg) => ({
       ...msg,
@@ -125,7 +193,7 @@ export const getMessages = async (req, res) => {
 
     res.json(messages);
   } catch (err) {
-    console.error("GET /messages Error:", err);
+    console.error("getMessages Error:", err);
     res.status(500).json({ message: "Server Error" });
   }
 };
@@ -302,5 +370,746 @@ export const getAvailableInstructors = async (req, res) => {
   } catch (err) {
     console.error("GET /available-instructors Error:", err);
     res.status(500).json({ message: "Server Error", error: err.message });
+  }
+};
+
+// --- GROUP CONTROLLERS ---
+
+// POST /api/chats/groups
+export const createGroup = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    const userId = req.user.id;
+
+    // Get user's college
+    const userRes = await pool.query(
+      "SELECT college FROM users WHERE user_id = $1",
+      [userId],
+    );
+    const college = userRes.rows[0].college;
+
+    if (!college) {
+      return res.status(400).json({
+        message: "Please set your college in profile settings first.",
+      });
+    }
+
+    const newGroup = await pool.query(
+      "INSERT INTO groups (name, description, college, creator_id) VALUES ($1, $2, $3, $4) RETURNING *",
+      [name, description, college, userId],
+    );
+
+    const groupId = newGroup.rows[0].group_id;
+
+    // Add creator as admin
+    await pool.query(
+      "INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'admin')",
+      [groupId, userId],
+    );
+
+    res.status(201).json(newGroup.rows[0]);
+  } catch (err) {
+    console.error("createGroup Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// GET /api/chats/groups/my
+export const getMyGroups = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query(
+      `
+            SELECT g.*, 
+            (SELECT text FROM messages m WHERE m.group_id = g.group_id ORDER BY m.created_at DESC LIMIT 1) as last_message,
+            (SELECT COUNT(*)::int FROM group_members gm_count WHERE gm_count.group_id = g.group_id) as member_count
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE gm.user_id = $1
+            ORDER BY g.created_at DESC
+        `,
+      [userId],
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("getMyGroups Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// GET /api/chats/groups/available
+export const getAvailableGroups = async (req, res) => {
+  try {
+    const userId = req?.user?.id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const userRes = await pool.query(
+      "SELECT college FROM users WHERE user_id = $1",
+      [userId],
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const college = userRes.rows[0].college;
+
+    if (!college) {
+      console.log(
+        `[getAvailableGroups] User ${userId} has no college set. Returning empty list.`,
+      );
+      return res.json([]);
+    }
+
+    const result = await pool.query(
+      `
+            SELECT g.* FROM groups g
+            WHERE g.college = $1
+            AND g.group_id NOT IN (SELECT group_id FROM group_members WHERE user_id = $2)
+            ORDER BY g.created_at DESC
+        `,
+      [college, userId],
+    );
+
+    console.log(
+      `[getAvailableGroups] Returning ${result.rows.length} groups for college ${college}`,
+    );
+    result.rows.forEach((r) =>
+      console.log(`  - Group: ${r.name} ID: ${r.group_id}`),
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("getAvailableGroups Error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
+};
+
+// POST /api/chats/groups/:groupId/join
+export const joinGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req?.user?.id;
+
+    if (!userId) {
+      console.error("❌ joinGroup: No userId in request");
+      return res.status(401).json({ message: "User session not found" });
+    }
+
+    if (!groupId) {
+      console.error("❌ joinGroup: No groupId in params");
+      return res.status(400).json({ message: "Group ID is required" });
+    }
+
+    console.log(`[JoinGroup] User:${userId} -> Group:${groupId}`);
+
+    // 1. Fetch group info
+    const groupRes = await pool.query(
+      "SELECT college, name FROM groups WHERE group_id = $1",
+      [groupId],
+    );
+    if (groupRes.rows.length === 0) {
+      console.error(`❌ joinGroup: Group ${groupId} not found`);
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    // 2. Fetch user info
+    const userRes = await pool.query(
+      "SELECT college FROM users WHERE user_id = $1",
+      [userId],
+    );
+    if (userRes.rows.length === 0) {
+      console.error(`❌ joinGroup: User ${userId} not found in DB`);
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const groupCollege = groupRes.rows[0].college;
+    const userCollege = userRes.rows[0].college;
+
+    console.log(
+      `[JoinGroup] Colleges - User:${userCollege || "NULL"} Group:${groupCollege}`,
+    );
+
+    // 3. Check college match
+    if (groupCollege !== userCollege) {
+      return res.status(403).json({
+        message: `Privacy Violation: You belong to ${userCollege || "Unknown"}, but this group is for ${groupCollege}.`,
+      });
+    }
+
+    // 4. Join
+    await pool.query(
+      "INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [groupId, userId],
+    );
+
+    console.log(
+      `✅ User ${userId} successfully joined ${groupRes.rows[0].name}`,
+    );
+    res.json({
+      message: "Joined successfully",
+      group_name: groupRes.rows[0].name,
+    });
+  } catch (err) {
+    console.error("❌ joinGroup Critical Error:", err);
+    res.status(500).json({
+      message: "Failed to join group due to a server error",
+      error: err.message,
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    });
+  }
+};
+
+// PUT /api/chats/groups/:groupId/meeting
+export const updateMeetingLink = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { meetingLink } = req.body;
+    const userId = req.user.id;
+
+    const groupRes = await pool.query(
+      "SELECT creator_id, name FROM groups WHERE group_id = $1",
+      [groupId],
+    );
+    if (groupRes.rows.length === 0)
+      return res.status(404).json({ message: "Group not found" });
+
+    if (groupRes.rows[0].creator_id !== userId) {
+      return res
+        .status(403)
+        .json({ message: "Only the group creator can start a meeting." });
+    }
+
+    await pool.query(
+      "UPDATE groups SET meeting_link = $1, updated_at = NOW() WHERE group_id = $2",
+      [meetingLink, groupId],
+    );
+
+    console.log(`🚀 Meeting started in ${groupRes.rows[0].name} by ${userId}`);
+    res.json({ message: "Meeting started successfully", meetingLink });
+  } catch (err) {
+    console.error("updateMeetingLink Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// DELETE /api/chats/groups/:groupId/meeting
+export const stopMeeting = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req?.user?.id;
+
+    const groupRes = await pool.query(
+      "SELECT creator_id, name FROM groups WHERE group_id = $1",
+      [groupId],
+    );
+    if (groupRes.rows.length === 0)
+      return res.status(404).json({ message: "Group not found" });
+
+    if (groupRes.rows[0].creator_id !== userId) {
+      return res
+        .status(403)
+        .json({ message: "Only the group creator can end the meeting." });
+    }
+
+    await pool.query(
+      "UPDATE groups SET meeting_link = NULL, updated_at = NOW() WHERE group_id = $1",
+      [groupId],
+    );
+
+    console.log(`🛑 Meeting ended in ${groupRes.rows[0].name} by ${userId}`);
+    res.json({ message: "Meeting ended successfully" });
+  } catch (err) {
+    console.error("stopMeeting Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// GET /api/chats/groups/:groupId/messages
+export const getGroupMessages = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const result = await pool.query(
+      `
+            SELECT 
+                m.*, 
+                u.firebase_uid as sender_uid,
+                u.full_name as sender_name, 
+                u.photo_url as sender_photo,
+                pm.text as parent_message_text,
+                pu.full_name as parent_message_sender_name,
+                (
+                    SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id, 'user_name', ru.full_name))
+                    FROM message_reactions mr
+                    JOIN users ru ON mr.user_id = ru.user_id
+                    WHERE mr.message_id = m.message_id
+                ) as reactions
+            FROM messages m
+            JOIN users u ON m.sender_id = u.user_id
+            LEFT JOIN messages pm ON m.reply_to_message_id = pm.message_id
+            LEFT JOIN users pu ON pm.sender_id = pu.user_id
+            WHERE m.group_id = $1
+            ORDER BY m.created_at ASC
+        `,
+      [groupId],
+    );
+
+    const baseUrl = process.env.BACKEND_URL;
+    const messages = result.rows.map((msg) => ({
+      ...msg,
+      attachment_url: msg.attachment_file_id
+        ? `${baseUrl}/api/chats/media/${msg.attachment_file_id}`
+        : null,
+    }));
+
+    res.json(messages);
+  } catch (err) {
+    console.error("getGroupMessages Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// PUT /api/chats/messages/:messageId
+export const editMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { text } = req.body;
+    const userId = req.user.id;
+
+    if (!text) return res.status(400).json({ message: "Text is required" });
+
+    const result = await pool.query(
+      `UPDATE messages 
+             SET text = $1, is_edited = TRUE, updated_at = NOW() 
+             WHERE message_id = $2 AND sender_id = $3 AND is_deleted = FALSE 
+             RETURNING *`,
+      [text, messageId, userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Message not found or unauthorized" });
+    }
+
+    const msg = result.rows[0];
+
+    // Fetch sender details for the socket payload
+    const userRes = await pool.query(
+      "SELECT full_name, firebase_uid FROM users WHERE user_id = $1",
+      [userId],
+    );
+    const sender = userRes.rows[0];
+
+    const payload = {
+      ...msg,
+      sender_name: sender.full_name,
+      sender_uid: sender.firebase_uid,
+    };
+
+    if (msg.group_id) {
+      req.io.to(`group_${msg.group_id}`).emit("edit_message", payload);
+    } else if (msg.chat_id) {
+      req.io.to(`chat_${msg.chat_id}`).emit("edit_message", payload);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    console.error("editMessage Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// DELETE /api/chats/messages/:messageId
+export const deleteMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role; // Assuming role is available on req.user
+
+    // Check if message exists
+    const check = await pool.query(
+      "SELECT sender_id FROM messages WHERE message_id = $1",
+      [messageId],
+    );
+    if (check.rows.length === 0)
+      return res.status(404).json({ message: "Message not found" });
+
+    const msg = check.rows[0];
+
+    // Permission check: Owner or Admin
+    if (msg.sender_id !== userId && userRole !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Unauthorized to delete this message" });
+    }
+
+    // Soft delete
+    const result = await pool.query(
+      `UPDATE messages 
+             SET is_deleted = TRUE, text = 'This message was deleted', attachment_file_id = NULL, updated_at = NOW() 
+             WHERE message_id = $1 
+             RETURNING *`,
+      [messageId],
+    );
+
+    const deletedMsg = result.rows[0];
+
+    if (deletedMsg.group_id) {
+      req.io
+        .to(`group_${deletedMsg.group_id}`)
+        .emit("delete_message", { messageId, is_deleted: true });
+    } else if (deletedMsg.chat_id) {
+      req.io
+        .to(`chat_${deletedMsg.chat_id}`)
+        .emit("delete_message", { messageId, is_deleted: true });
+    }
+
+    res.json({ message: "Message deleted", id: messageId });
+  } catch (err) {
+    console.error("deleteMessage Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+export const getGroupMembers = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    console.log(`[getGroupMembers] Fetching members for group: ${groupId}`);
+
+    const result = await pool.query(
+      `
+            SELECT u.user_id as id, u.full_name as name, u.role as global_role, gm.role as group_role, u.photo_url, u.email 
+            FROM group_members gm 
+            JOIN users u ON gm.user_id = u.user_id 
+            WHERE gm.group_id = $1
+            ORDER BY u.full_name ASC
+        `,
+      [groupId],
+    );
+
+    console.log(`[getGroupMembers] Found ${result.rows.length} members`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching members:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+export const updateGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { name, description } = req.body;
+    const userId = req.user.id;
+
+    console.log(
+      `[updateGroup] User ${userId} attempting to update group ${groupId}`,
+    );
+    console.log(`[updateGroup] Payload:`, { name, description });
+
+    // Check if user is admin
+    const memberCheck = await pool.query(
+      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, userId],
+    );
+
+    if (memberCheck.rowCount === 0 || memberCheck.rows[0].role !== "admin") {
+      console.warn(
+        `[updateGroup] Permission denied for user ${userId} on group ${groupId}`,
+      );
+      return res
+        .status(403)
+        .json({ message: "Only group admins can edit details" });
+    }
+
+    const result = await pool.query(
+      "UPDATE groups SET name = $1, description = $2 WHERE group_id = $3 RETURNING *",
+      [name, description, groupId],
+    );
+
+    if (result.rowCount === 0) {
+      console.error(`[updateGroup] Group ${groupId} not found for update`);
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    const updatedGroup = result.rows[0];
+    console.log(`[updateGroup] Success:`, updatedGroup);
+
+    // Notify members via socket
+    if (req.io) {
+      req.io.to(`group_${groupId}`).emit("group_updated", updatedGroup);
+    }
+
+    res.json(updatedGroup);
+  } catch (err) {
+    console.error("Error updating group:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+export const leaveGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    // Get member info
+    const memberRes = await pool.query(
+      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, userId],
+    );
+
+    if (memberRes.rowCount === 0) {
+      return res
+        .status(404)
+        .json({ message: "You are not a member of this group" });
+    }
+
+    const userRole = memberRes.rows[0].role;
+
+    // If admin, check if there are other admins
+    if (userRole === "admin") {
+      const adminCountRes = await pool.query(
+        "SELECT COUNT(*) FROM group_members WHERE group_id = $1 AND role = 'admin'",
+        [groupId],
+      );
+      const adminCount = parseInt(adminCountRes.rows[0].count);
+
+      if (adminCount === 1) {
+        // Last admin. check if there are other members at all.
+        const totalMembersRes = await pool.query(
+          "SELECT COUNT(*) FROM group_members WHERE group_id = $1",
+          [groupId],
+        );
+        const totalMembers = parseInt(totalMembersRes.rows[0].count);
+
+        if (totalMembers > 1) {
+          return res.status(400).json({
+            message:
+              "As the only admin, you must promote another member to admin before leaving, or delete the group.",
+          });
+        } else {
+          // Last person in group. Just delete group.
+          await pool.query("DELETE FROM groups WHERE group_id = $1", [groupId]);
+          return res.json({
+            message: "Left and deleted group as you were the last member.",
+          });
+        }
+      }
+    }
+
+    // Standard leave
+    await pool.query(
+      "DELETE FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, userId],
+    );
+
+    res.json({ message: "Successfully left the group" });
+  } catch (err) {
+    console.error("leaveGroup error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const deleteGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    // Check if user is admin
+    const memberRes = await pool.query(
+      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, userId],
+    );
+
+    if (memberRes.rowCount === 0 || memberRes.rows[0].role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only group admins can delete the group" });
+    }
+
+    // Delete group (cascade will handle members and messages)
+    await pool.query("DELETE FROM groups WHERE group_id = $1", [groupId]);
+
+    if (req.io) {
+      req.io.to(`group_${groupId}`).emit("group_deleted", { groupId });
+    }
+
+    res.json({ message: "Group deleted successfully" });
+  } catch (err) {
+    console.error("deleteGroup error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const promoteToAdmin = async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const requesterId = req.user.id;
+
+    // Check if requester is admin
+    const memberRes = await pool.query(
+      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, requesterId],
+    );
+
+    if (memberRes.rowCount === 0 || memberRes.rows[0].role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only group admins can promote others" });
+    }
+
+    await pool.query(
+      "UPDATE group_members SET role = 'admin' WHERE group_id = $1 AND user_id = $2",
+      [groupId, userId],
+    );
+
+    res.json({ message: "Member promoted to admin" });
+  } catch (err) {
+    console.error("promoteToAdmin error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const removeMember = async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const requesterId = req.user.id;
+
+    // Cannot remove self via this endpoint (use leaveGroup)
+    if (userId === requesterId) {
+      return res
+        .status(400)
+        .json({ message: "Use leaveGroup to exit the group yourself" });
+    }
+
+    // Check if requester is admin
+    const requesterRes = await pool.query(
+      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, requesterId],
+    );
+
+    if (requesterRes.rowCount === 0 || requesterRes.rows[0].role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only group admins can remove members" });
+    }
+
+    // Check if target is admin (usually admins shouldn't remove other admins depending on policy, but WhatsApp lets you remove any member)
+    // We'll allow removing anyone except yourself.
+
+    await pool.query(
+      "DELETE FROM group_members WHERE group_id = $1 AND user_id = $2",
+      [groupId, userId],
+    );
+
+    // Notify target via socket
+    if (req.io) {
+      req.io.to(`user_${userId}`).emit("removed_from_group", { groupId });
+    }
+
+    res.json({ message: "Member removed successfully" });
+  } catch (err) {
+    console.error("removeMember error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const addReaction = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+    const userId = req.user.id;
+
+    console.log(
+      `👍 Adding reaction: ${emoji} to message: ${messageId} by user: ${userId}`,
+    );
+
+    await pool.query(
+      `
+            INSERT INTO message_reactions (message_id, user_id, emoji)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (message_id, user_id) 
+            DO UPDATE SET emoji = $3, created_at = CURRENT_TIMESTAMP
+        `,
+      [messageId, userId, emoji],
+    );
+
+    const result = await pool.query(
+      `
+            SELECT mr.emoji, mr.user_id, u.full_name as user_name
+            FROM message_reactions mr
+            JOIN users u ON mr.user_id = u.user_id
+            WHERE mr.message_id = $1
+        `,
+      [messageId],
+    );
+
+    if (req.io) {
+      // Find if group or private chat
+      const msgInfo = await pool.query(
+        "SELECT group_id, chat_id FROM messages WHERE message_id = $1",
+        [messageId],
+      );
+      if (msgInfo.rowCount > 0) {
+        const { group_id, chat_id } = msgInfo.rows[0];
+        const room = group_id ? `group_${group_id}` : `chat_${chat_id}`;
+        req.io.to(room).emit("message_reaction_updated", {
+          messageId,
+          reactions: result.rows,
+        });
+      }
+    }
+
+    res.json({ message: "Reaction updated", reactions: result.rows });
+  } catch (err) {
+    console.error("addReaction error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const removeReaction = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+
+    console.log(
+      `👎 Removing reaction from message: ${messageId} by user: ${userId}`,
+    );
+
+    await pool.query(
+      "DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2",
+      [messageId, userId],
+    );
+
+    const result = await pool.query(
+      `
+            SELECT mr.emoji, mr.user_id, u.full_name as user_name
+            FROM message_reactions mr
+            JOIN users u ON mr.user_id = u.user_id
+            WHERE mr.message_id = $1
+        `,
+      [messageId],
+    );
+
+    if (req.io) {
+      const msgInfo = await pool.query(
+        "SELECT group_id, chat_id FROM messages WHERE message_id = $1",
+        [messageId],
+      );
+      if (msgInfo.rowCount > 0) {
+        const { group_id, chat_id } = msgInfo.rows[0];
+        const room = group_id ? `group_${group_id}` : `chat_${chat_id}`;
+        req.io.to(room).emit("message_reaction_updated", {
+          messageId,
+          reactions: result.rows,
+        });
+      }
+    }
+
+    res.json({ message: "Reaction removed", reactions: result.rows });
+  } catch (err) {
+    console.error("removeReaction error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
