@@ -282,7 +282,7 @@ export const advanceModuleStream = async (req, res) => {
         `UPDATE module_progress 
          SET current_chunk_index = $1, completed_at = NOW(), last_accessed_at = NOW()
          WHERE module_id = $2 AND student_id = $3
-         RETURNING progress_id`,
+         RETURNING module_id, student_id`,
         [totalChunks, moduleId, studentId]
       );
 
