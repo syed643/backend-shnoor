@@ -109,6 +109,10 @@ export const submitExam = async (req, res) => {
           INSERT INTO exam_answers
             (exam_id, question_id, student_id, selected_option_id, marks_obtained)
           VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT ON CONSTRAINT unique_answer_per_question
+          DO UPDATE SET
+            selected_option_id = EXCLUDED.selected_option_id,
+            marks_obtained = EXCLUDED.marks_obtained
           `,
           [
             examId,
@@ -128,6 +132,9 @@ export const submitExam = async (req, res) => {
           INSERT INTO exam_answers
             (exam_id, question_id, student_id, answer_text, marks_obtained)
           VALUES ($1, $2, $3, $4, NULL)
+          ON CONFLICT ON CONSTRAINT unique_answer_per_question
+          DO UPDATE SET
+            answer_text = EXCLUDED.answer_text
           `,
           [examId, ans.question_id, studentId, answerText]
         );
