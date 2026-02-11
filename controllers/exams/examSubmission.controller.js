@@ -1,4 +1,5 @@
 import pool from "../../db/postgres.js";
+import { issueExamCertificate } from "../certificate.controller.js";
 export const submitExam = async (req, res) => {
   const client = await pool.connect();
 
@@ -146,18 +147,54 @@ export const submitExam = async (req, res) => {
       [examId]
     );
 
+    if (!exam.length) {
+      const err = new Error("Exam not found");
+      err.status = 404;
+      throw err;
+    }
+
     const passed = percentage >= exam[0].pass_percentage;
 
     await client.query(
       `
       INSERT INTO exam_results
-        (exam_id, student_id, total_marks, obtained_marks, percentage, passed)
-      VALUES ($1, $2, $3, $4, $5, $6)
+        (exam_id, student_id, total_marks, obtained_marks, percentage, passed, evaluated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (exam_id, student_id)
+      DO UPDATE SET
+        total_marks = EXCLUDED.total_marks,
+        obtained_marks = EXCLUDED.obtained_marks,
+        percentage = EXCLUDED.percentage,
+        passed = EXCLUDED.passed,
+        evaluated_at = NOW()
       `,
       [examId, studentId, totalMarks, obtainedMarks, percentage, passed]
     );
 
     await client.query("COMMIT");
+
+    // Auto-issue certificate if exam passed and no coding questions present
+    let certificateIssued = false;
+    if (passed) {
+      try {
+        const hasCoding = await pool.query(
+          `SELECT 1 FROM exam_questions WHERE exam_id = $1 AND question_type = 'coding' LIMIT 1`,
+          [examId]
+        );
+
+        if (hasCoding.rows.length === 0) {
+          const certResult = await issueExamCertificate({
+            userId: studentId,
+            examId,
+            score: percentage
+          });
+          certificateIssued = certResult.issued;
+        }
+      } catch (certErr) {
+        console.error("Certificate issuance error:", certErr);
+        // Don't fail the exam submission if certificate fails
+      }
+    }
 
     res.status(201).json({
       message: "Exam submitted successfully",
@@ -165,6 +202,7 @@ export const submitExam = async (req, res) => {
       obtainedMarks,
       percentage,
       passed,
+      certificateIssued
     });
   } catch (err) {
     await client.query("ROLLBACK");
