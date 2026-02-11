@@ -1,5 +1,6 @@
 import pool from "../../db/postgres.js";
 import { issueExamCertificate } from "../certificate.controller.js";
+import { autoGradeDescriptive } from "./examdescriptive.controller.js";
 export const submitExam = async (req, res) => {
   const client = await pool.connect();
 
@@ -38,7 +39,7 @@ export const submitExam = async (req, res) => {
     let obtainedMarks = 0;
     const { rows: questions } = await client.query(
       `
-      SELECT question_id, marks, question_type
+      SELECT question_id, marks, question_type, keywords, min_word_count
       FROM exam_questions
       WHERE exam_id = $1
       `,
@@ -127,16 +128,29 @@ export const submitExam = async (req, res) => {
       if (question.question_type === "descriptive") {
         const answerText =
           ans.answer_text ?? ans.value ?? ans.text ?? ans.response ?? "";
+        
+        // Auto-grade based on word count and keywords
+        const keywords = question.keywords || [];
+        const minWordCount = question.min_word_count || 30;
+        const marksObtained = autoGradeDescriptive(
+          answerText,
+          keywords,
+          minWordCount,
+          question.marks
+        );
+        obtainedMarks += marksObtained;
+        
         await client.query(
           `
           INSERT INTO exam_answers
             (exam_id, question_id, student_id, answer_text, marks_obtained)
-          VALUES ($1, $2, $3, $4, NULL)
+          VALUES ($1, $2, $3, $4, $5)
           ON CONFLICT ON CONSTRAINT unique_answer_per_question
           DO UPDATE SET
-            answer_text = EXCLUDED.answer_text
+            answer_text = EXCLUDED.answer_text,
+            marks_obtained = EXCLUDED.marks_obtained
           `,
-          [examId, ans.question_id, studentId, answerText]
+          [examId, ans.question_id, studentId, answerText, marksObtained]
         );
       }
       // Coding submissions are ignored for now.
