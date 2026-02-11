@@ -100,7 +100,7 @@ router.get("/:user_id", async (req, res) => {
     const result = await pool.query(
       `SELECT * FROM certificates 
        WHERE user_id::text = $1 
-       OR user_id = (SELECT firebase_uid FROM users WHERE user_id::text = $1)`,
+       OR user_id::text = (SELECT firebase_uid FROM users WHERE user_id::text = $1 OR firebase_uid = $1)`,
       [user_id]
     );
 
