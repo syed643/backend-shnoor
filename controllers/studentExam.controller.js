@@ -227,7 +227,7 @@ export const submitExam = async (req, res) => {
           INSERT INTO exam_answers
             (exam_id, question_id, student_id, selected_option_id, marks_obtained)
           VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT (exam_id, question_id, student_id)
+          ON CONFLICT ON CONSTRAINT unique_answer_per_question
           DO UPDATE SET
             selected_option_id = EXCLUDED.selected_option_id,
             marks_obtained = EXCLUDED.marks_obtained
