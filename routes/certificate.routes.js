@@ -81,6 +81,38 @@ router.post("/add", async (req, res) => {
 });
 
 // ---------------------------
+// GET → Fetch my certificates (authenticated user) - MUST come before /:user_id
+// ---------------------------
+router.get(
+  "/my",
+  firebaseAuth,
+  attachUser,
+  async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          message: "Unauthorized: user ID not found"
+        });
+      }
+
+      const result = await pool.query(
+        `SELECT * FROM certificates 
+         WHERE user_id = $1
+         ORDER BY issued_at DESC`,
+        [userId]
+      );
+
+      res.json(result.rows);
+    } catch (err) {
+      console.error("GET /my error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ---------------------------
 // GET → Fetch certificate by user_id
 // ---------------------------
 router.get("/:user_id", async (req, res) => {
@@ -117,38 +149,6 @@ router.get("/:user_id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ---------------------------
-// GET → Fetch my certificates (authenticated user)
-// ---------------------------
-router.get(
-  "/my",
-  firebaseAuth,
-  attachUser,
-  async (req, res) => {
-    try {
-      const userId = req.user.id;
-
-      if (!userId) {
-        return res.status(401).json({
-          message: "Unauthorized: user ID not found"
-        });
-      }
-
-      const result = await pool.query(
-        `SELECT * FROM certificates 
-         WHERE user_id = $1
-         ORDER BY issued_at DESC`,
-        [userId]
-      );
-
-      res.json(result.rows);
-    } catch (err) {
-      console.error("GET /my error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  }
-);
 
 // ---------------------------
 // POST → Generate quiz certificate
