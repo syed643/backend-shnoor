@@ -162,48 +162,132 @@ WHERE o.question_id = q.question_id
 };
 
 export const submitExam = async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { examId } = req.params;
     const studentId = req.user.id;
     const { answers } = req.body;
 
-    const attempted = await pool.query(
+    if (!answers || Object.keys(answers).length === 0) {
+      return res.status(400).json({ message: "No answers submitted" });
+    }
+
+    await client.query("BEGIN");
+
+    /* =========================
+       1️⃣ FETCH QUESTIONS
+    ========================= */
+    const { rows: questions } = await client.query(
       `
-      SELECT 1
-      FROM exam_submissions
-      WHERE exam_id = $1 AND student_id = $2
+      SELECT q.question_id, q.marks, q.question_type, o.option_id, o.is_correct
+      FROM exam_questions q
+      LEFT JOIN exam_mcq_options o ON q.question_id = o.question_id
+      WHERE q.exam_id = $1
       `,
-      [examId, studentId],
+      [examId]
     );
 
-    if (attempted.rowCount > 0) {
-      return res.status(400).json({
-        message: "Exam already submitted",
-      });
+    let totalMarks = 0;
+    let obtainedMarks = 0;
+
+    const questionMap = {};
+    questions.forEach(q => {
+      if (!questionMap[q.question_id]) {
+        questionMap[q.question_id] = q;
+        totalMarks += q.marks;
+      }
+    });
+
+    /* =========================
+       2️⃣ SAVE ANSWERS (UPSERT)
+    ========================= */
+    for (const [questionId, answer] of Object.entries(answers)) {
+      const question = questionMap[questionId];
+      if (!question) continue;
+
+      let marksObtained = 0;
+
+      if (question.question_type === "mcq") {
+        const selectedOptionId = answer;
+
+        const correct = questions.find(
+          q => q.question_id === questionId &&
+               q.option_id === selectedOptionId &&
+               q.is_correct
+        );
+
+        if (correct) {
+          marksObtained = question.marks;
+          obtainedMarks += marksObtained;
+        }
+
+        await client.query(
+          `
+          INSERT INTO exam_answers
+            (exam_id, question_id, student_id, selected_option_id, marks_obtained)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (exam_id, question_id, student_id)
+          DO UPDATE SET
+            selected_option_id = EXCLUDED.selected_option_id,
+            marks_obtained = EXCLUDED.marks_obtained
+          `,
+          [examId, questionId, studentId, selectedOptionId, marksObtained]
+        );
+      }
     }
 
     /* =========================
-       2️⃣ SAVE SUBMISSION
+       3️⃣ CALCULATE RESULT
     ========================= */
-    await pool.query(
-      `
-      INSERT INTO exam_submissions
-        (exam_id, student_id, answers, submitted_at)
-      VALUES ($1, $2, $3, NOW())
-      `,
-      [examId, studentId, answers],
+    const percentage =
+      totalMarks === 0 ? 0 : Math.round((obtainedMarks / totalMarks) * 100);
+
+    const { rows } = await client.query(
+      `SELECT pass_percentage FROM exams WHERE exam_id = $1`,
+      [examId]
     );
 
-    return res.status(200).json({
+    const passed = percentage >= rows[0].pass_percentage;
+
+    /* =========================
+       4️⃣ SAVE RESULT (UPSERT)
+    ========================= */
+    await client.query(
+      `
+      INSERT INTO exam_results
+        (exam_id, student_id, total_marks, obtained_marks, percentage, passed, evaluated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (exam_id, student_id)
+      DO UPDATE SET
+        total_marks = EXCLUDED.total_marks,
+        obtained_marks = EXCLUDED.obtained_marks,
+        percentage = EXCLUDED.percentage,
+        passed = EXCLUDED.passed,
+        evaluated_at = NOW()
+      `,
+      [examId, studentId, totalMarks, obtainedMarks, percentage, passed]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(200).json({
       message: "Exam submitted successfully",
+      totalMarks,
+      obtainedMarks,
+      percentage,
+      passed
     });
+
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("submitExam error:", err);
-    return res.status(500).json({
-      message: "Failed to submit exam",
-    });
+    res.status(500).json({ message: "Failed to submit exam" });
+  } finally {
+    client.release();
   }
 };
+
 
 {
   /*export const submitExam = async (req, res) => {
