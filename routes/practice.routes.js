@@ -11,6 +11,7 @@ import {
   deleteChallenge,
   bulkUploadChallenges,
 } from "../controllers/practice.controller.js";
+import multer from "multer";
 
 const router = express.Router();
 const upload = multer({
