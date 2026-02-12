@@ -438,18 +438,29 @@ export const createGroup = async (req, res) => {
 export const getMyGroups = async (req, res) => {
   try {
     const userId = req.user.id;
-    const result = await pool.query(
-      `
-            SELECT g.*, 
-            (SELECT text FROM messages m WHERE m.group_id = g.group_id ORDER BY m.created_at DESC LIMIT 1) as last_message,
-            (SELECT COUNT(*)::int FROM group_members gm_count WHERE gm_count.group_id = g.group_id) as member_count
-            FROM groups g
-            JOIN group_members gm ON g.group_id = gm.group_id
-            WHERE gm.user_id = $1
-            ORDER BY g.created_at DESC
-        `,
-      [userId],
-    );
+const result = await pool.query(
+  `
+  SELECT 
+    g.*,
+    lm.text AS last_message,
+    COUNT(gm2.user_id)::int AS member_count
+  FROM groups g
+  JOIN group_members gm ON g.group_id = gm.group_id
+  LEFT JOIN LATERAL (
+    SELECT text
+    FROM messages
+    WHERE group_id = g.group_id
+    ORDER BY created_at DESC
+    LIMIT 1
+  ) lm ON true
+  LEFT JOIN group_members gm2 ON gm2.group_id = g.group_id
+  WHERE gm.user_id = $1
+  GROUP BY g.group_id, lm.text
+  ORDER BY g.created_at DESC
+  `,
+  [userId]
+);
+
 
     res.json(result.rows);
   } catch (err) {
@@ -650,32 +661,45 @@ export const stopMeeting = async (req, res) => {
 export const getGroupMessages = async (req, res) => {
   try {
     const { groupId } = req.params;
+
+    // Pagination params
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100); // max 100
+    const offset = parseInt(req.query.offset) || 0;
+
     const result = await pool.query(
       `
-            SELECT 
-                m.*, 
-                u.firebase_uid as sender_uid,
-                u.full_name as sender_name, 
-                u.photo_url as sender_photo,
-                pm.text as parent_message_text,
-                pu.full_name as parent_message_sender_name,
-                (
-                    SELECT json_agg(json_build_object('emoji', mr.emoji, 'user_id', mr.user_id, 'user_name', ru.full_name))
-                    FROM message_reactions mr
-                    JOIN users ru ON mr.user_id = ru.user_id
-                    WHERE mr.message_id = m.message_id
-                ) as reactions
-            FROM messages m
-            JOIN users u ON m.sender_id = u.user_id
-            LEFT JOIN messages pm ON m.reply_to_message_id = pm.message_id
-            LEFT JOIN users pu ON pm.sender_id = pu.user_id
-            WHERE m.group_id = $1
-            ORDER BY m.created_at ASC
-        `,
-      [groupId],
+      SELECT 
+        m.*, 
+        u.firebase_uid as sender_uid,
+        u.full_name as sender_name, 
+        u.photo_url as sender_photo,
+        pm.text as parent_message_text,
+        pu.full_name as parent_message_sender_name,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'emoji', mr.emoji,
+              'user_id', mr.user_id,
+              'user_name', ru.full_name
+            )
+          )
+          FROM message_reactions mr
+          JOIN users ru ON mr.user_id = ru.user_id
+          WHERE mr.message_id = m.message_id
+        ) as reactions
+      FROM messages m
+      JOIN users u ON m.sender_id = u.user_id
+      LEFT JOIN messages pm ON m.reply_to_message_id = pm.message_id
+      LEFT JOIN users pu ON pm.sender_id = pu.user_id
+      WHERE m.group_id = $1
+      ORDER BY m.created_at ASC
+      LIMIT $2 OFFSET $3
+      `,
+      [groupId, limit, offset]
     );
 
     const baseUrl = process.env.BACKEND_URL;
+
     const messages = result.rows.map((msg) => ({
       ...msg,
       attachment_url: msg.attachment_file_id
@@ -683,12 +707,20 @@ export const getGroupMessages = async (req, res) => {
         : null,
     }));
 
-    res.json(messages);
+    res.json({
+      messages,
+      pagination: {
+        limit,
+        offset,
+        count: messages.length,
+      },
+    });
   } catch (err) {
     console.error("getGroupMessages Error:", err);
     res.status(500).json({ message: "Server Error" });
   }
 };
+
 
 // PUT /api/chats/messages/:messageId
 export const editMessage = async (req, res) => {
