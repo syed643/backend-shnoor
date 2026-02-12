@@ -104,7 +104,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("send_message", async (data) => {
-    console.log("📨 send_message event received:", data);
 
     const {
       chatId,
@@ -118,10 +117,8 @@ io.on("connection", (socket) => {
       attachment_name,
     } = data;
 
-    console.log("📨 Parsed data:", { chatId, senderId, recipientId, text });
 
     try {
-      console.log("📨 Attempting to insert message into database...");
       const result = await pool.query(
         `INSERT INTO messages (
                 chat_id, sender_id, receiver_id, text, 
