@@ -18,7 +18,7 @@ export const getMyProfile = async (req, res) => {
         linkedin,
         github,
         photo_url AS "photoURL",
-        college_id AS college,
+        college,
         created_at
       FROM users
       WHERE user_id = $1
@@ -139,7 +139,7 @@ export const updateMyProfile = async (req, res) => {
         linkedin = $4,
         github = $5,
         photo_url = $6,
-        college_id = $7,
+        college = $7,
         updated_at = NOW()
       WHERE user_id = $8
       `,
