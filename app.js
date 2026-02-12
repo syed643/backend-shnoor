@@ -103,10 +103,17 @@ io.on("connection", (socket) => {
     console.log(`Socket ${socket.id} joined chat_${chatId}`);
   });
 
+  // Group join room
+  socket.on("join_group", (groupId) => {
+    socket.join(`group_${groupId}`);
+    console.log(`Socket ${socket.id} joined group_${groupId}`);
+  });
+
   socket.on("send_message", async (data) => {
 
     const {
       chatId,
+      groupId,
       text,
       senderId,
       senderUid,
@@ -115,65 +122,133 @@ io.on("connection", (socket) => {
       attachment_file_id,
       attachment_type,
       attachment_name,
+      reply_to_message_id,
     } = data;
 
-
     try {
-      const result = await pool.query(
-        `INSERT INTO messages (
-                chat_id, sender_id, receiver_id, text, 
-                attachment_file_id, attachment_type, attachment_name
+      // Handle GROUP messages
+      if (groupId) {
+        const result = await pool.query(
+          `INSERT INTO messages (
+                group_id, sender_id, text, 
+                attachment_file_id, attachment_type, attachment_name,
+                reply_to_message_id
             ) 
              VALUES ($1, $2, $3, $4, $5, $6, $7) 
              RETURNING *`,
-        [
-          chatId,
-          senderId,
-          recipientId,
-          text || "",
-          attachment_file_id || null,
-          attachment_type || null,
-          attachment_name || null,
-        ],
-      );
-      const savedMsg = result.rows[0];
-      console.log("✅ Message saved to database:", savedMsg);
+          [
+            groupId,
+            senderId,
+            text || "",
+            attachment_file_id || null,
+            attachment_type || null,
+            attachment_name || null,
+            reply_to_message_id || null,
+          ],
+        );
+        const savedMsg = result.rows[0];
+        console.log("✅ Group message saved to database:", savedMsg);
 
-      // Construct Payload with File URL if needed
-      const payload = {
-        ...savedMsg,
-        sender_uid: senderUid,
-        sender_name: senderName,
-        attachment_url: savedMsg.attachment_file_id
-          ? `${baseUrl}/api/chats/media/${msg.attachment_file_id}`
-          : null,
-      };
+        // Construct Payload with File URL if needed
+        const payload = {
+          ...savedMsg,
+          sender_uid: senderUid,
+          sender_name: senderName,
+          attachment_url: savedMsg.attachment_file_id
+            ? `${baseUrl}/api/media/${savedMsg.attachment_file_id}`
+            : null,
+        };
 
-      console.log(
-        "📨 Broadcasting receive_message to chat_" +
-          chatId +
-          " (excluding sender)",
-      );
-      // Broadcast to Chat Room (EXCLUDING SENDER to avoid duplicates)
-      // Sender already has optimistic UI update
-      socket.broadcast.to(`chat_${chatId}`).emit("receive_message", payload);
+        console.log(
+          "📨 Broadcasting receive_message to group_" +
+            groupId +
+            " (excluding sender)",
+        );
+        // Broadcast to Group Room (EXCLUDING SENDER to avoid duplicates)
+        socket.broadcast.to(`group_${groupId}`).emit("receive_message", payload);
 
-      console.log("📨 Emitting new_notification to user_" + recipientId);
-      // Emit Notification to Recipient's User Room
-      io.to(`user_${recipientId}`).emit("new_notification", {
-        chat_id: chatId,
-        sender_id: senderId,
-        sender_name: senderName,
-        text: text || "Sent an attachment",
-        created_at: savedMsg.created_at,
-      });
+        // Notify all group members except sender
+        const membersResult = await pool.query(
+          "SELECT user_id FROM group_members WHERE group_id = $1 AND user_id != $2",
+          [groupId, senderId],
+        );
 
-      // Update Updated_At
-      await pool.query(
-        "UPDATE chats SET updated_at = NOW() WHERE chat_id = $1",
-        [chatId],
-      );
-      console.log("✅ Message handling complete");
+        membersResult.rows.forEach((member) => {
+          io.to(`user_${member.user_id}`).emit("new_notification", {
+            group_id: groupId,
+            sender_id: senderId,
+            sender_name: senderName,
+            text: text || "Sent an attachment",
+            created_at: savedMsg.created_at,
+          });
+        });
+
+        // Update group's updated_at timestamp
+        await pool.query(
+          "UPDATE groups SET updated_at = NOW() WHERE group_id = $1",
+          [groupId],
+        );
+        console.log("✅ Group message handling complete");
+      } 
+      // Handle DM messages
+      else if (chatId && recipientId) {
+        const result = await pool.query(
+          `INSERT INTO messages (
+                chat_id, sender_id, receiver_id, text, 
+                attachment_file_id, attachment_type, attachment_name,
+                reply_to_message_id
+            ) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+             RETURNING *`,
+          [
+            chatId,
+            senderId,
+            recipientId,
+            text || "",
+            attachment_file_id || null,
+            attachment_type || null,
+            attachment_name || null,
+            reply_to_message_id || null,
+          ],
+        );
+        const savedMsg = result.rows[0];
+        console.log("✅ DM message saved to database:", savedMsg);
+
+        // Construct Payload with File URL if needed
+        const payload = {
+          ...savedMsg,
+          sender_uid: senderUid,
+          sender_name: senderName,
+          attachment_url: savedMsg.attachment_file_id
+            ? `${baseUrl}/api/media/${savedMsg.attachment_file_id}`
+            : null,
+        };
+
+        console.log(
+          "📨 Broadcasting receive_message to chat_" +
+            chatId +
+            " (excluding sender)",
+        );
+        // Broadcast to Chat Room (EXCLUDING SENDER to avoid duplicates)
+        socket.broadcast.to(`chat_${chatId}`).emit("receive_message", payload);
+
+        console.log("📨 Emitting new_notification to user_" + recipientId);
+        // Emit Notification to Recipient's User Room
+        io.to(`user_${recipientId}`).emit("new_notification", {
+          chat_id: chatId,
+          sender_id: senderId,
+          sender_name: senderName,
+          text: text || "Sent an attachment",
+          created_at: savedMsg.created_at,
+        });
+
+        // Update Updated_At
+        await pool.query(
+          "UPDATE chats SET updated_at = NOW() WHERE chat_id = $1",
+          [chatId],
+        );
+        console.log("✅ DM message handling complete");
+      }
     } catch (err) {
       console.error("❌ Socket Message Error:", err);
     }
