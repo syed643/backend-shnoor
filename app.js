@@ -27,7 +27,6 @@ import certificateRoutes from "./routes/certificate.routes.js"
 import contestRoutes from "./routes/contest.routes.js";
 import contestQuestionRoutes from "./routes/contestQuestion.routes.js";
 import contestAdvancedRoutes from "./routes/contestAdvanced.routes.js";
-import clggrpRoutes from "./routes/clggrp.routes.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -80,7 +79,6 @@ app.use("/api/certificate",certificateRoutes)
 app.use("/api/contests", contestRoutes)
 app.use("/api/contests", contestQuestionRoutes);
 app.use("/api/contests", contestAdvancedRoutes);
-app.use("/api/student-groups", clggrpRoutes)
 
 app.get("/", (req, res) => {
   res.send("API is running 🚀");
