@@ -378,21 +378,38 @@ export const getAvailableInstructors = async (req, res) => {
 // POST /api/chats/groups
 export const createGroup = async (req, res) => {
   try {
+    console.log("🔵 POST /api/chats/groups hit");
+    console.log("🔵 User:", req.user);
+    console.log("🔵 Body:", req.body);
+
     const { name, description } = req.body;
     const userId = req.user.id;
+
+    if (!name) {
+      console.error("❌ Group name is empty");
+      return res.status(400).json({
+        message: "Group name is required.",
+      });
+    }
 
     // Get user's college
     const userRes = await pool.query(
       "SELECT college FROM users WHERE user_id = $1",
       [userId],
     );
-    const college = userRes.rows[0].college;
+    
+    console.log("🔵 User from DB:", userRes.rows[0]);
+
+    const college = userRes.rows[0]?.college;
 
     if (!college) {
+      console.error("❌ User has no college set");
       return res.status(400).json({
         message: "Please set your college in profile settings first.",
       });
     }
+
+    console.log("🔵 Creating group with:", { name, description, college, userId });
 
     const newGroup = await pool.query(
       "INSERT INTO groups (name, description, college, creator_id) VALUES ($1, $2, $3, $4) RETURNING *",
@@ -401,16 +418,19 @@ export const createGroup = async (req, res) => {
 
     const groupId = newGroup.rows[0].group_id;
 
+    console.log("🔵 Group created:", groupId);
+
     // Add creator as admin
     await pool.query(
       "INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'admin')",
       [groupId, userId],
     );
 
+    console.log("✅ Group with members created successfully");
     res.status(201).json(newGroup.rows[0]);
   } catch (err) {
-    console.error("createGroup Error:", err);
-    res.status(500).json({ message: "Server Error" });
+    console.error("❌ createGroup Error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
   }
 };
 
