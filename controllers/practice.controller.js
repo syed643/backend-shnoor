@@ -1,4 +1,6 @@
 import pool from "../db/postgres.js";
+import csvParser from "csv-parser";
+import { Readable } from "stream";
 
 // Create a new challenge
 export const createChallenge = async (req, res) => {
@@ -128,4 +130,148 @@ export const verifyPracticeSchema = async () => {
   } catch (err) {
     console.error("❌ Practice schema check failed", err);
   }
+};
+
+export const bulkUploadChallenges = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: "No file uploaded" });
+        }
+
+        const results = [];
+        const errors = [];
+        let rowNumber = 0;
+
+        // Parse CSV from buffer
+        const stream = Readable.from(req.file.buffer.toString());
+
+        stream
+            .pipe(csvParser())
+            .on("data", (row) => {
+                rowNumber++;
+                try {
+                    // Validate required fields
+                    if (!row.title || !row.description || !row.difficulty) {
+                        errors.push({
+                            row: rowNumber,
+                            data: row,
+                            error: "Missing required fields (title, description, or difficulty)",
+                        });
+                        return;
+                    }
+
+                    // Validate difficulty
+                    const validDifficulties = ["Easy", "Medium", "Hard"];
+                    if (!validDifficulties.includes(row.difficulty)) {
+                        errors.push({
+                            row: rowNumber,
+                            data: row,
+                            error: `Invalid difficulty. Must be one of: ${validDifficulties.join(", ")}`,
+                        });
+                        return;
+                    }
+
+                    // Parse test_cases JSON
+                    let testCases = [];
+                    if (row.test_cases) {
+                        try {
+                            testCases = JSON.parse(row.test_cases);
+
+                            // Validate test case structure
+                            if (!Array.isArray(testCases)) {
+                                throw new Error("test_cases must be an array");
+                            }
+
+                            // Ensure each test case has required fields
+                            testCases = testCases.map((tc) => ({
+                                input: tc.input || "",
+                                output: tc.output || "",
+                                isPublic: tc.isPublic === true || tc.isPublic === "true",
+                            }));
+                        } catch (e) {
+                            errors.push({
+                                row: rowNumber,
+                                data: row,
+                                error: `Invalid test_cases JSON: ${e.message}`,
+                            });
+                            return;
+                        }
+                    }
+
+                    // Add to results for bulk insert
+                    results.push({
+                        title: row.title.trim(),
+                        description: row.description.trim(),
+                        type: row.type || "code",
+                        difficulty: row.difficulty.trim(),
+                        starter_code: row.starter_code || "",
+                        test_cases: testCases,
+                    });
+                } catch (err) {
+                    errors.push({
+                        row: rowNumber,
+                        data: row,
+                        error: err.message,
+                    });
+                }
+            })
+            .on("end", async () => {
+                try {
+                    // Bulk insert valid challenges
+                    const insertedChallenges = [];
+
+                    for (const challenge of results) {
+                        const result = await pool.query(
+                            `INSERT INTO practice_challenges 
+               (title, description, type, difficulty, starter_code, test_cases) 
+               VALUES ($1, $2, $3, $4, $5, $6) 
+               RETURNING *`,
+                            [
+                                challenge.title,
+                                challenge.description,
+                                challenge.type,
+                                challenge.difficulty,
+                                challenge.starter_code,
+                                JSON.stringify(challenge.test_cases),
+                            ]
+                        );
+                        insertedChallenges.push(result.rows[0]);
+                    }
+
+                    res.status(200).json({
+                        message: "CSV upload completed",
+                        summary: {
+                            total: rowNumber,
+                            successful: insertedChallenges.length,
+                            failed: errors.length,
+                        },
+                        insertedChallenges,
+                        errors: errors.length > 0 ? errors : undefined,
+                    });
+                } catch (dbError) {
+                    console.error("Database insertion error:", dbError);
+                    res.status(500).json({
+                        message: "Database error during bulk insert",
+                        error: dbError.message,
+                        partialResults: {
+                            parsed: results.length,
+                            errors: errors.length,
+                        },
+                    });
+                }
+            })
+            .on("error", (err) => {
+                console.error("CSV parsing error:", err);
+                res.status(500).json({
+                    message: "Failed to parse CSV file",
+                    error: err.message,
+                });
+            });
+    } catch (err) {
+        console.error("Bulk upload error:", err);
+        res.status(500).json({
+            message: "Server error during upload",
+            error: err.message,
+        });
+    }
 };

@@ -29,41 +29,40 @@ import {
 } from "../controllers/chat.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
-import roleGuard from "../middlewares/roleGuard.js";
 const router = express.Router();
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 50 * 1024 * 1024 } // 50MB
 });
 
-router.get("/", firebaseAuth, attachUser, roleGuard, getMyChats);
-router.get("/messages/:chatId", firebaseAuth, attachUser, roleGuard, getMessages);
-router.put("/messages/:messageId", firebaseAuth, attachUser, roleGuard, editMessage);
-router.delete("/messages/:messageId", firebaseAuth, attachUser, roleGuard, deleteMessage);
-router.get("/available-students", firebaseAuth, attachUser, roleGuard, getAvailableStudents);
-router.get("/available-instructors", firebaseAuth, attachUser, roleGuard, getAvailableInstructors);
-router.post("/", firebaseAuth, attachUser, roleGuard, createChat);
-router.post("/upload", firebaseAuth, attachUser, roleGuard, upload.single('file'), uploadFile);
-router.put("/read", firebaseAuth, attachUser, roleGuard, markRead);
+router.get("/", firebaseAuth, attachUser, getMyChats);
+router.get("/messages/:chatId", firebaseAuth, attachUser, getMessages);
+router.put("/messages/:messageId", firebaseAuth, attachUser, editMessage);
+router.delete("/messages/:messageId", firebaseAuth, attachUser, deleteMessage);
+router.get("/available-students", firebaseAuth, attachUser, getAvailableStudents);
+router.get("/available-instructors", firebaseAuth, attachUser, getAvailableInstructors);
+router.post("/", firebaseAuth, attachUser, createChat);
+router.post("/upload", firebaseAuth, attachUser, upload.single('file'), uploadFile);
+router.put("/read", firebaseAuth, attachUser, markRead);
 
 // Groups
-router.post("/groups", firebaseAuth, attachUser, roleGuard, createGroup);
-router.get("/groups/my", firebaseAuth, attachUser, roleGuard, getMyGroups);
-router.get("/groups/available", firebaseAuth, attachUser, roleGuard, getAvailableGroups);
-router.post("/groups/:groupId/join", firebaseAuth, attachUser, roleGuard, joinGroup);
-router.put("/groups/:groupId/meeting", firebaseAuth, attachUser, roleGuard, updateMeetingLink);
-router.delete("/groups/:groupId/meeting", firebaseAuth, attachUser, roleGuard, stopMeeting);
-router.get("/groups/:groupId/messages", firebaseAuth, attachUser, roleGuard, getGroupMessages);
-router.get("/groups/:groupId/members", firebaseAuth, attachUser, roleGuard, getGroupMembers);
-router.put("/groups/:groupId", firebaseAuth, attachUser, roleGuard, updateGroup);
-router.post("/groups/:groupId/leave", firebaseAuth, attachUser, roleGuard, leaveGroup);
-router.delete("/groups/:groupId", firebaseAuth, attachUser, roleGuard, deleteGroup);
-router.put("/groups/:groupId/promote/:userId", firebaseAuth, attachUser, roleGuard, promoteToAdmin);
-router.delete("/groups/:groupId/members/:userId", firebaseAuth, attachUser, roleGuard, removeMember);
+router.post("/groups", firebaseAuth, attachUser, createGroup);
+router.get("/groups/my", firebaseAuth, attachUser, getMyGroups);
+router.get("/groups/available", firebaseAuth, attachUser, getAvailableGroups);
+router.post("/groups/:groupId/join", firebaseAuth, attachUser, joinGroup);
+router.put("/groups/:groupId/meeting", firebaseAuth, attachUser, updateMeetingLink);
+router.delete("/groups/:groupId/meeting", firebaseAuth, attachUser, stopMeeting);
+router.get("/groups/:groupId/messages", firebaseAuth, attachUser, getGroupMessages);
+router.get("/groups/:groupId/members", firebaseAuth, attachUser, getGroupMembers);
+router.put("/groups/:groupId", firebaseAuth, attachUser, updateGroup);
+router.post("/groups/:groupId/leave", firebaseAuth, attachUser, leaveGroup);
+router.delete("/groups/:groupId", firebaseAuth, attachUser, deleteGroup);
+router.put("/groups/:groupId/promote/:userId", firebaseAuth, attachUser, promoteToAdmin);
+router.delete("/groups/:groupId/members/:userId", firebaseAuth, attachUser, removeMember);
 
 // Reactions
-router.post("/messages/:messageId/react", firebaseAuth, attachUser, roleGuard, addReaction);
-router.delete("/messages/:messageId/react", firebaseAuth, attachUser, roleGuard, removeReaction);
+router.post("/messages/:messageId/react", firebaseAuth, attachUser, addReaction);
+router.delete("/messages/:messageId/react", firebaseAuth, attachUser, removeReaction);
 
 console.log("✅ Chat routes registered");
 

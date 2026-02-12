@@ -20,7 +20,7 @@ export const initChatTables = async () => {
 
     // Groups Table
     await pool.query(`
-            CREATE TABLE IF NOT EXISTS groups (
+            CREATE TABLE IF NOT EXISTS college_groups (
                 group_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 name TEXT NOT NULL,
                 description TEXT,
@@ -34,8 +34,8 @@ export const initChatTables = async () => {
 
     // Group Members Table
     await pool.query(`
-            CREATE TABLE IF NOT EXISTS group_members (
-                group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+            CREATE TABLE IF NOT EXISTS clg_group_members (
+                group_id UUID REFERENCES college_groups(group_id) ON DELETE CASCADE,
                 user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 role TEXT DEFAULT 'member',
@@ -60,7 +60,7 @@ export const initChatTables = async () => {
             CREATE TABLE IF NOT EXISTS messages (
                 message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 chat_id UUID REFERENCES chats(chat_id) ON DELETE CASCADE,
-                group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+                group_id UUID REFERENCES college_groups(group_id) ON DELETE CASCADE,
                 sender_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
                 receiver_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
                 text TEXT NOT NULL,
@@ -75,11 +75,11 @@ export const initChatTables = async () => {
 
     // Migration/Alter updates for existing tables
     const alterQueries = [
-      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE",
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES college_groups(group_id) ON DELETE CASCADE",
       "ALTER TABLE messages ALTER COLUMN chat_id DROP NOT NULL",
       "ALTER TABLE messages ALTER COLUMN receiver_id DROP NOT NULL",
-      "ALTER TABLE groups ADD COLUMN IF NOT EXISTS meeting_link TEXT",
-      "ALTER TABLE groups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+      "ALTER TABLE college_groups ADD COLUMN IF NOT EXISTS meeting_link TEXT",
+      "ALTER TABLE college_groups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
       "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE",
       "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE",
       "ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
@@ -317,12 +317,16 @@ export const serveFile = async (req, res) => {
 export const getAvailableStudents = async (req, res) => {
   try {
     const userId = req.user.id;
+    console.log("🔵 getAvailableStudents called for user:", userId);
+
     const query = `
             SELECT 
                 u.user_id,
                 u.full_name,
                 u.email,
                 u.firebase_uid,
+                u.role,
+                u.status,
                 CASE 
                     WHEN c.chat_id IS NOT NULL THEN c.chat_id
                     ELSE NULL
@@ -331,14 +335,25 @@ export const getAvailableStudents = async (req, res) => {
             LEFT JOIN chats c ON (
                 (c.student_id = u.user_id AND c.instructor_id = $1)
             )
-            WHERE u.role IN ('student', 'learner') 
-            AND u.status = 'active'
+            WHERE (LOWER(u.role) IN ('student', 'learner') OR u.role ILIKE 'student' OR u.role ILIKE 'learner')
+            AND (u.status = 'active' OR u.status IS NULL)
             ORDER BY u.full_name ASC;
         `;
     const result = await pool.query(query, [userId]);
+    console.log("🔵 Found students:", result.rows.length);
+    console.log("🔵 Student data:", result.rows);
+    
+    if (result.rows.length === 0) {
+      console.warn("⚠️ No students found. Checking database directly...");
+      const allUsersCheck = await pool.query(
+        "SELECT user_id, full_name, role, status FROM users LIMIT 10"
+      );
+      console.log("⚠️ Sample users from DB:", allUsersCheck.rows);
+    }
+
     res.json(result.rows);
   } catch (err) {
-    console.error("GET /available-students Error:", err);
+    console.error("❌ GET /available-students Error:", err);
     res.status(500).json({ message: "Server Error", error: err.message });
   }
 };
@@ -347,12 +362,16 @@ export const getAvailableStudents = async (req, res) => {
 export const getAvailableInstructors = async (req, res) => {
   try {
     const userId = req.user.id;
+    console.log("🔵 getAvailableInstructors called for user:", userId);
+
     const query = `
             SELECT 
                 u.user_id,
                 u.full_name,
                 u.email,
                 u.firebase_uid,
+                u.role,
+                u.status,
                 CASE 
                     WHEN c.chat_id IS NOT NULL THEN c.chat_id
                     ELSE NULL
@@ -361,14 +380,25 @@ export const getAvailableInstructors = async (req, res) => {
             LEFT JOIN chats c ON (
                 (c.instructor_id = u.user_id AND c.student_id = $1)
             )
-            WHERE u.role IN ('instructor', 'company') 
-            AND u.status = 'active'
+            WHERE (LOWER(u.role) IN ('instructor', 'company') OR u.role ILIKE 'instructor' OR u.role ILIKE 'company')
+            AND (u.status = 'active' OR u.status IS NULL)
             ORDER BY u.full_name ASC;
         `;
     const result = await pool.query(query, [userId]);
+    console.log("🔵 Found instructors:", result.rows.length);
+    console.log("🔵 Instructor data:", result.rows);
+    
+    if (result.rows.length === 0) {
+      console.warn("⚠️ No instructors found. Checking database directly...");
+      const allUsersCheck = await pool.query(
+        "SELECT user_id, full_name, role, status FROM users LIMIT 10"
+      );
+      console.log("⚠️ Sample users from DB:", allUsersCheck.rows);
+    }
+
     res.json(result.rows);
   } catch (err) {
-    console.error("GET /available-instructors Error:", err);
+    console.error("❌ GET /available-instructors Error:", err);
     res.status(500).json({ message: "Server Error", error: err.message });
   }
 };
@@ -412,7 +442,7 @@ export const createGroup = async (req, res) => {
     console.log("🔵 Creating group with:", { name, description, college, userId });
 
     const newGroup = await pool.query(
-      "INSERT INTO groups (name, description, college, creator_id) VALUES ($1, $2, $3, $4) RETURNING *",
+      "INSERT INTO college_groups (name, description, college, creator_id) VALUES ($1, $2, $3, $4) RETURNING *",
       [name, description, college, userId],
     );
 
@@ -422,7 +452,7 @@ export const createGroup = async (req, res) => {
 
     // Add creator as admin
     await pool.query(
-      "INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'admin')",
+      "INSERT INTO clg_group_members (group_id, user_id, role) VALUES ($1, $2, 'admin')",
       [groupId, userId],
     );
 
@@ -444,8 +474,8 @@ const result = await pool.query(
     g.*,
     lm.text AS last_message,
     COUNT(gm2.user_id)::int AS member_count
-  FROM groups g
-  JOIN group_members gm ON g.group_id = gm.group_id
+  FROM college_groups g
+  JOIN clg_group_members gm ON g.group_id = gm.group_id
   LEFT JOIN LATERAL (
     SELECT text
     FROM messages
@@ -453,7 +483,7 @@ const result = await pool.query(
     ORDER BY created_at DESC
     LIMIT 1
   ) lm ON true
-  LEFT JOIN group_members gm2 ON gm2.group_id = g.group_id
+  LEFT JOIN clg_group_members gm2 ON gm2.group_id = g.group_id
   WHERE gm.user_id = $1
   GROUP BY g.group_id, lm.text
   ORDER BY g.created_at DESC
@@ -495,9 +525,9 @@ export const getAvailableGroups = async (req, res) => {
 
     const result = await pool.query(
       `
-            SELECT g.* FROM groups g
+            SELECT g.* FROM college_groups g
             WHERE g.college = $1
-            AND g.group_id NOT IN (SELECT group_id FROM group_members WHERE user_id = $2)
+            AND g.group_id NOT IN (SELECT group_id FROM clg_group_members WHERE user_id = $2)
             ORDER BY g.created_at DESC
         `,
       [college, userId],
@@ -537,7 +567,7 @@ export const joinGroup = async (req, res) => {
 
     // 1. Fetch group info
     const groupRes = await pool.query(
-      "SELECT college, name FROM groups WHERE group_id = $1",
+      "SELECT college, name FROM college_groups WHERE group_id = $1",
       [groupId],
     );
     if (groupRes.rows.length === 0) {
@@ -571,7 +601,7 @@ export const joinGroup = async (req, res) => {
 
     // 4. Join
     await pool.query(
-      "INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      "INSERT INTO clg_group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
       [groupId, userId],
     );
 
@@ -600,7 +630,7 @@ export const updateMeetingLink = async (req, res) => {
     const userId = req.user.id;
 
     const groupRes = await pool.query(
-      "SELECT creator_id, name FROM groups WHERE group_id = $1",
+      "SELECT creator_id, name FROM college_groups WHERE group_id = $1",
       [groupId],
     );
     if (groupRes.rows.length === 0)
@@ -613,7 +643,7 @@ export const updateMeetingLink = async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE groups SET meeting_link = $1, updated_at = NOW() WHERE group_id = $2",
+      "UPDATE college_groups SET meeting_link = $1, updated_at = NOW() WHERE group_id = $2",
       [meetingLink, groupId],
     );
 
@@ -632,7 +662,7 @@ export const stopMeeting = async (req, res) => {
     const userId = req?.user?.id;
 
     const groupRes = await pool.query(
-      "SELECT creator_id, name FROM groups WHERE group_id = $1",
+      "SELECT creator_id, name FROM college_groups WHERE group_id = $1",
       [groupId],
     );
     if (groupRes.rows.length === 0)
@@ -645,7 +675,7 @@ export const stopMeeting = async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE groups SET meeting_link = NULL, updated_at = NOW() WHERE group_id = $1",
+      "UPDATE college_groups SET meeting_link = NULL, updated_at = NOW() WHERE group_id = $1",
       [groupId],
     );
 
@@ -720,7 +750,6 @@ export const getGroupMessages = async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 };
-
 
 // PUT /api/chats/messages/:messageId
 export const editMessage = async (req, res) => {
@@ -833,7 +862,7 @@ export const getGroupMembers = async (req, res) => {
     const result = await pool.query(
       `
             SELECT u.user_id as id, u.full_name as name, u.role as global_role, gm.role as group_role, u.photo_url, u.email 
-            FROM group_members gm 
+            FROM clg_group_members gm 
             JOIN users u ON gm.user_id = u.user_id 
             WHERE gm.group_id = $1
             ORDER BY u.full_name ASC
@@ -862,7 +891,7 @@ export const updateGroup = async (req, res) => {
 
     // Check if user is admin
     const memberCheck = await pool.query(
-      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "SELECT role FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, userId],
     );
 
@@ -876,7 +905,7 @@ export const updateGroup = async (req, res) => {
     }
 
     const result = await pool.query(
-      "UPDATE groups SET name = $1, description = $2 WHERE group_id = $3 RETURNING *",
+      "UPDATE college_groups SET name = $1, description = $2 WHERE group_id = $3 RETURNING *",
       [name, description, groupId],
     );
 
@@ -907,7 +936,7 @@ export const leaveGroup = async (req, res) => {
 
     // Get member info
     const memberRes = await pool.query(
-      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "SELECT role FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, userId],
     );
 
@@ -922,7 +951,7 @@ export const leaveGroup = async (req, res) => {
     // If admin, check if there are other admins
     if (userRole === "admin") {
       const adminCountRes = await pool.query(
-        "SELECT COUNT(*) FROM group_members WHERE group_id = $1 AND role = 'admin'",
+        "SELECT COUNT(*) FROM clg_group_members WHERE group_id = $1 AND role = 'admin'",
         [groupId],
       );
       const adminCount = parseInt(adminCountRes.rows[0].count);
@@ -930,7 +959,7 @@ export const leaveGroup = async (req, res) => {
       if (adminCount === 1) {
         // Last admin. check if there are other members at all.
         const totalMembersRes = await pool.query(
-          "SELECT COUNT(*) FROM group_members WHERE group_id = $1",
+          "SELECT COUNT(*) FROM clg_group_members WHERE group_id = $1",
           [groupId],
         );
         const totalMembers = parseInt(totalMembersRes.rows[0].count);
@@ -942,7 +971,7 @@ export const leaveGroup = async (req, res) => {
           });
         } else {
           // Last person in group. Just delete group.
-          await pool.query("DELETE FROM groups WHERE group_id = $1", [groupId]);
+          await pool.query("DELETE FROM college_groups WHERE group_id = $1", [groupId]);
           return res.json({
             message: "Left and deleted group as you were the last member.",
           });
@@ -952,7 +981,7 @@ export const leaveGroup = async (req, res) => {
 
     // Standard leave
     await pool.query(
-      "DELETE FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "DELETE FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, userId],
     );
 
@@ -970,7 +999,7 @@ export const deleteGroup = async (req, res) => {
 
     // Check if user is admin
     const memberRes = await pool.query(
-      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "SELECT role FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, userId],
     );
 
@@ -981,7 +1010,7 @@ export const deleteGroup = async (req, res) => {
     }
 
     // Delete group (cascade will handle members and messages)
-    await pool.query("DELETE FROM groups WHERE group_id = $1", [groupId]);
+    await pool.query("DELETE FROM college_groups WHERE group_id = $1", [groupId]);
 
     if (req.io) {
       req.io.to(`group_${groupId}`).emit("group_deleted", { groupId });
@@ -1001,7 +1030,7 @@ export const promoteToAdmin = async (req, res) => {
 
     // Check if requester is admin
     const memberRes = await pool.query(
-      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "SELECT role FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, requesterId],
     );
 
@@ -1012,7 +1041,7 @@ export const promoteToAdmin = async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE group_members SET role = 'admin' WHERE group_id = $1 AND user_id = $2",
+      "UPDATE clg_group_members SET role = 'admin' WHERE group_id = $1 AND user_id = $2",
       [groupId, userId],
     );
 
@@ -1037,7 +1066,7 @@ export const removeMember = async (req, res) => {
 
     // Check if requester is admin
     const requesterRes = await pool.query(
-      "SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "SELECT role FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, requesterId],
     );
 
@@ -1051,7 +1080,7 @@ export const removeMember = async (req, res) => {
     // We'll allow removing anyone except yourself.
 
     await pool.query(
-      "DELETE FROM group_members WHERE group_id = $1 AND user_id = $2",
+      "DELETE FROM clg_group_members WHERE group_id = $1 AND user_id = $2",
       [groupId, userId],
     );
 
@@ -1164,4 +1193,34 @@ export const removeReaction = async (req, res) => {
     console.error("removeReaction error:", err);
     res.status(500).json({ message: "Server error" });
   }
+};
+
+export const getAvailableAdmins = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const query = `
+            SELECT 
+                u.user_id,
+                u.full_name,
+                u.email,
+                u.firebase_uid,
+                CASE 
+                    WHEN c.chat_id IS NOT NULL THEN c.chat_id
+                    ELSE NULL
+                END as existing_chat_id
+            FROM users u
+            LEFT JOIN chats c ON (
+                (c.participant1 = u.user_id AND c.participant2 = $1)
+                OR (c.participant1 = $1 AND c.participant2 = u.user_id)
+            )
+            WHERE u.role = 'admin' 
+              AND u.status = 'active'
+            ORDER BY u.full_name ASC;
+        `;
+        const result = await pool.query(query, [userId]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error("GET /available-admins Error:", err);
+        res.status(500).json({ message: "Server Error" });
+    }
 };
