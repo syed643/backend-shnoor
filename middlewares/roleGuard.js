@@ -37,6 +37,10 @@ const roleGuard = (...allowedRoles) => {
 
     const { role } = req.user;
 
+    if (allowedRoles.length === 0) {
+      return next();
+    }
+
     // 🔐 Role-based access only
     if (!allowedRoles.includes(role)) {
       return res.status(403).json({
