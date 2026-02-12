@@ -25,7 +25,8 @@ import {
     promoteToAdmin,
     removeMember,
     addReaction,
-    removeReaction
+    removeReaction,
+    serveFile
 } from "../controllers/chat.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
@@ -35,6 +36,7 @@ const upload = multer({
     limits: { fileSize: 50 * 1024 * 1024 } // 50MB
 });
 
+router.get("/media/:id", serveFile);
 router.get("/", firebaseAuth, attachUser, getMyChats);
 router.get("/messages/:chatId", firebaseAuth, attachUser, getMessages);
 router.put("/messages/:messageId", firebaseAuth, attachUser, editMessage);
