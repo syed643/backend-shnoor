@@ -137,25 +137,42 @@ io.on("connection", (socket) => {
         const isAdminGroup = groupCheck.rows.length > 0;
         const tableName = isAdminGroup ? 'admin_group_messages' : 'group_messages';
         const messageColumn = isAdminGroup ? 'text' : 'message';
-        
-        const result = await pool.query(
-              `INSERT INTO ${tableName} (
-                group_id, sender_id, ${messageColumn}, 
+
+        const insertSql = isAdminGroup
+          ? `INSERT INTO ${tableName} (
+                group_id, sender_id, ${messageColumn},
+                attachment_file_id, attachment_type, attachment_name
+            )
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING *`
+          : `INSERT INTO ${tableName} (
+                group_id, sender_id, ${messageColumn},
                 attachment_file_id, attachment_type, attachment_name,
                 reply_to_message_id
-            ) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7) 
-             RETURNING *`,
-          [
-            groupId,
-            senderId,
-            text || "",
-            attachment_file_id || null,
-            attachment_type || null,
-            attachment_name || null,
-            reply_to_message_id || null,
-          ],
-        );
+            )
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING *`;
+
+        const insertParams = isAdminGroup
+          ? [
+              groupId,
+              senderId,
+              text || "",
+              attachment_file_id || null,
+              attachment_type || null,
+              attachment_name || null,
+            ]
+          : [
+              groupId,
+              senderId,
+              text || "",
+              attachment_file_id || null,
+              attachment_type || null,
+              attachment_name || null,
+              reply_to_message_id || null,
+            ];
+
+        const result = await pool.query(insertSql, insertParams);
         const savedMsg = result.rows[0];
         console.log(`✅ ${isAdminGroup ? 'Admin' : 'College'} group message saved:`, savedMsg);
 
