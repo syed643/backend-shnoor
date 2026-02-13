@@ -12,7 +12,7 @@ export const createGroup = async (req, res) => {
     if (!name?.trim()) return res.status(400).json({ message: 'Group name required' });
 
     const result = await pool.query(
-      'INSERT INTO groups (admin_id, name, description) VALUES ($1, $2, $3) RETURNING group_id',
+      'INSERT INTO admin_groups (admin_id, name, description) VALUES ($1, $2, $3) RETURNING group_id',
       [adminId, name.trim(), description?.trim() || null]
     );
 
@@ -30,7 +30,7 @@ export const getMyGroups = async (req, res) => {
     if (!adminId) return res.status(401).json({ message: 'Unauthorized' });
 
     const result = await pool.query(
-      'SELECT * FROM groups WHERE admin_id = $1 ORDER BY created_at DESC',
+      'SELECT * FROM admin_groups WHERE admin_id = $1 ORDER BY created_at DESC',
       [adminId]
     );
     res.json(result.rows);
@@ -79,8 +79,8 @@ export const getStudentGroups = async (req, res) => {
          g.created_at,
          g.admin_id,
          COUNT(gm.user_id) AS member_count
-       FROM groups g
-       JOIN group_members gm ON g.group_id = gm.group_id
+       FROM admin_groups g
+       JOIN admin_group_members gm ON g.group_id = gm.group_id
        WHERE gm.user_id = $1
        GROUP BY g.group_id
        ORDER BY g.created_at DESC`,
@@ -121,7 +121,7 @@ export const addMemberToGroup = async (req, res) => {
     // Permission check
     const perm = await pool.query(
       `SELECT role_in_group 
-       FROM group_members 
+       FROM admin_group_members 
        WHERE group_id = $1 AND user_id = $2`,
       [groupId, userId]
     );
@@ -134,7 +134,7 @@ export const addMemberToGroup = async (req, res) => {
     if (!canAdd) return res.status(403).json({ message: 'Not authorized' });
 
     await pool.query(
-      'INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      'INSERT INTO admin_group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [groupId, studentId]
     );
 
@@ -150,7 +150,7 @@ export const removeMemberFromGroup = async (req, res) => {
     const { groupId, userId } = req.params; // userId = student to remove
 
     await pool.query(
-      'DELETE FROM group_members WHERE group_id = $1 AND user_id = $2',
+      'DELETE FROM admin_group_members WHERE group_id = $1 AND user_id = $2',
       [groupId, userId]
     );
 
@@ -184,8 +184,8 @@ export const getAllGroups = async (req, res) => {
          g.created_at,
          g.admin_id,
          u.full_name AS admin_name,
-         (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.group_id) AS member_count
-       FROM groups g
+         (SELECT COUNT(*) FROM admin_group_members gm WHERE gm.group_id = g.group_id) AS member_count
+       FROM admin_groups g
        LEFT JOIN users u ON g.admin_id = u.user_id
        ORDER BY g.created_at DESC`
     );
@@ -208,13 +208,13 @@ export const promoteToLeader = async (req, res) => {
     if (!adminId) return res.status(401).json({ message: 'Unauthorized' });
 
     // Only admin of the group can promote
-    const group = await pool.query('SELECT admin_id FROM groups WHERE group_id = $1', [groupId]);
+    const group = await pool.query('SELECT admin_id FROM admin_groups WHERE group_id = $1', [groupId]);
     if (group.rows[0]?.admin_id !== adminId) {
       return res.status(403).json({ message: 'Only group admin can promote' });
     }
 
     await pool.query(
-      'UPDATE group_members SET role_in_group = $1 WHERE group_id = $2 AND user_id = $3',
+      'UPDATE admin_group_members SET role_in_group = $1 WHERE group_id = $2 AND user_id = $3',
       [role, groupId, userId]
     );
 
@@ -234,13 +234,13 @@ export const sendGroupMessage = async (req, res) => {
 
     // Check membership
     const member = await pool.query(
-      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      'SELECT 1 FROM admin_group_members WHERE group_id = $1 AND user_id = $2',
       [groupId, senderId]
     );
     if (member.rows.length === 0) return res.status(403).json({ message: 'Not a member' });
 
     const result = await pool.query(
-      `INSERT INTO group_messages 
+      `INSERT INTO admin_group_messages 
        (group_id, sender_id, text, attachment_file_id, attachment_type, attachment_name)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
       [groupId, senderId, text || null, attachment_file_id || null, attachment_type || null, attachment_name || null]
@@ -285,8 +285,8 @@ export const getGroupById = async (req, res) => {
          purpose,
          created_at,
          admin_id,
-         (SELECT COUNT(*) FROM group_members WHERE group_id = $1) AS member_count
-       FROM groups
+         (SELECT COUNT(*) FROM admin_group_members WHERE group_id = $1) AS member_count
+       FROM admin_groups
        WHERE group_id = $1`,
       [groupId]
     );
@@ -299,7 +299,7 @@ export const getGroupById = async (req, res) => {
 
     // Step 3: Permission check – allow members OR group admin
     const membershipCheck = await pool.query(
-      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      'SELECT 1 FROM admin_group_members WHERE group_id = $1 AND user_id = $2',
       [groupId, userId]
     );
 
@@ -355,7 +355,7 @@ export const getGroupMessages = async (req, res) => {
 
     // Step 2: Fetch group info to check admin_id
     const groupQuery = await pool.query(
-      'SELECT admin_id FROM groups WHERE group_id = $1',
+      'SELECT admin_id FROM admin_groups WHERE group_id = $1',
       [groupId]
     );
 
@@ -370,7 +370,7 @@ export const getGroupMessages = async (req, res) => {
 
     if (!isGroupAdmin) {
       const membership = await pool.query(
-        'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+        'SELECT 1 FROM admin_group_members WHERE group_id = $1 AND user_id = $2',
         [groupId, userId]
       );
       isMember = membership.rows.length > 0;
@@ -393,7 +393,7 @@ export const getGroupMessages = async (req, res) => {
          m.attachment_type,
          m.attachment_name,
          u.full_name AS sender_name
-       FROM group_messages m
+       FROM admin_group_messages m
        JOIN users u ON m.sender_id = u.user_id
        WHERE m.group_id = $1
        ORDER BY m.created_at ASC`,
@@ -425,13 +425,15 @@ export const getColleges = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT 
-         c.college_id,
-         c.name,
-         COUNT(cs.student_id) AS student_count
-       FROM colleges c
-       LEFT JOIN college_students cs ON cs.college_id = c.college_id
-       GROUP BY c.college_id, c.name
-       ORDER BY c.name ASC`
+         u.college AS college_id,
+         u.college AS name,
+         COUNT(*) AS student_count
+       FROM users u
+       WHERE u.role = 'student'
+         AND u.college IS NOT NULL
+         AND u.college <> ''
+       GROUP BY u.college
+       ORDER BY u.college ASC`
     );
 
     res.json(result.rows);
@@ -450,9 +452,10 @@ export const createGroupByCollege = async (req, res) => {
     const adminUid = req.firebase?.uid;
     if (!adminUid) return res.status(401).json({ message: 'Unauthorized' });
 
-    const { name, description, college_id } = req.body;
+    const { name, description, college_id, college_name, college } = req.body;
+    const collegeValue = (college || college_name || college_id || '').trim();
 
-    if (!name?.trim() || !college_id) {
+    if (!name?.trim() || !collegeValue) {
       return res.status(400).json({ message: 'Group name and college required' });
     }
 
@@ -471,7 +474,7 @@ export const createGroupByCollege = async (req, res) => {
 
     // Create group
     const groupRes = await client.query(
-      `INSERT INTO groups (admin_id, name, description, created_at)
+      `INSERT INTO admin_groups (admin_id, name, description, created_at)
        VALUES ($1, $2, $3, NOW()) RETURNING group_id`,
       [adminId, name.trim(), description?.trim() || null]
     );
@@ -480,11 +483,13 @@ export const createGroupByCollege = async (req, res) => {
 
     // Get students from this college
     const studentsRes = await client.query(
-      `SELECT student_id FROM college_students WHERE college_id = $1`,
-      [college_id]
+      `SELECT user_id
+       FROM users
+       WHERE role = 'student' AND college = $1`,
+      [collegeValue]
     );
 
-    const studentIds = studentsRes.rows.map(r => r.student_id);
+    const studentIds = studentsRes.rows.map(r => r.user_id);
 
     if (studentIds.length === 0) {
       await client.query('ROLLBACK');
@@ -494,7 +499,7 @@ export const createGroupByCollege = async (req, res) => {
     // Bulk insert into group_members
     const values = studentIds.map(id => `('${groupId}', '${id}', 'member')`).join(', ');
     await client.query(
-      `INSERT INTO group_members (group_id, user_id, role_in_group)
+      `INSERT INTO admin_group_members (group_id, user_id, role_in_group)
        VALUES ${values}
        ON CONFLICT (group_id, user_id) DO NOTHING`
     );
@@ -504,7 +509,8 @@ export const createGroupByCollege = async (req, res) => {
     res.status(201).json({
       group_id: groupId,
       name,
-      college_id,
+      college_id: collegeValue,
+      college_name: collegeValue,
       member_count: studentIds.length
     });
   } catch (err) {
