@@ -26,7 +26,7 @@ router.use((req, res, next) => {
 });
 // Admin-only routes
 router.post('/', firebaseAuth,attachUser,roleGuard("admin"), createGroup);
-router.get('/', firebaseAuth,attachUser,roleGuard("admin"), getMyGroups);
+router.get('/admin/my-groups', firebaseAuth,attachUser,roleGuard("admin"), getMyGroups);
 router.post('/:groupId/members', firebaseAuth,attachUser,roleGuard("admin"), addMemberToGroup);
 router.delete('/:groupId/members/:userId', firebaseAuth,attachUser,roleGuard("admin"), removeMemberFromGroup);
 router.put('/:groupId/members/:userId/role', firebaseAuth,attachUser,roleGuard("admin"), promoteToLeader);

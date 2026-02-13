@@ -128,8 +128,17 @@ io.on("connection", (socket) => {
     try {
       // Handle GROUP messages
       if (groupId) {
+        // Check if it's an admin group or college group
+        const groupCheck = await pool.query(
+          'SELECT 1 FROM admin_groups WHERE group_id = $1',
+          [groupId]
+        );
+        
+        const isAdminGroup = groupCheck.rows.length > 0;
+        const tableName = isAdminGroup ? 'admin_group_messages' : 'group_messages';
+        
         const result = await pool.query(
-          `INSERT INTO messages (
+          `INSERT INTO ${tableName} (
                 group_id, sender_id, text, 
                 attachment_file_id, attachment_type, attachment_name,
                 reply_to_message_id
@@ -147,7 +156,7 @@ io.on("connection", (socket) => {
           ],
         );
         const savedMsg = result.rows[0];
-        console.log("✅ Group message saved to database:", savedMsg);
+        console.log(`✅ ${isAdminGroup ? 'Admin' : 'College'} group message saved:`, savedMsg);
 
         // Construct Payload with File URL if needed
         const payload = {
@@ -165,11 +174,12 @@ io.on("connection", (socket) => {
             " (excluding sender)",
         );
         // Broadcast to Group Room (EXCLUDING SENDER to avoid duplicates)
-        socket.broadcast.to(`group_${groupId}`).emit("receive_message", payload);
+        socket.broadcast.to(`group_${groupId}`).emit("group_message", payload);
 
         // Notify all group members except sender
+        const memberTable = isAdminGroup ? 'admin_group_members' : 'clg_group_members';
         const membersResult = await pool.query(
-          "SELECT user_id FROM group_members WHERE group_id = $1 AND user_id != $2",
+          `SELECT user_id FROM ${memberTable} WHERE group_id = $1 AND user_id != $2`,
           [groupId, senderId],
         );
 
@@ -183,12 +193,14 @@ io.on("connection", (socket) => {
           });
         });
 
-        // Update group's updated_at timestamp
+        const groupTable = isAdminGroup ? 'admin_groups' : 'college_groups';
         await pool.query(
-          "UPDATE groups SET updated_at = NOW() WHERE group_id = $1",
+          `UPDATE ${groupTable} SET updated_at = NOW() WHERE group_id = $1`,
           [groupId],
         );
-        console.log("✅ Group message handling complete");
+        console.log(
+          `✅ ${isAdminGroup ? 'Admin' : 'College'} group message handling complete`,
+        );
       } 
       // Handle DM messages
       else if (chatId && recipientId) {

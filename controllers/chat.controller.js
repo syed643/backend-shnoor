@@ -478,7 +478,7 @@ const result = await pool.query(
   JOIN clg_group_members gm ON g.group_id = gm.group_id
   LEFT JOIN LATERAL (
     SELECT text
-    FROM messages
+    FROM group_messages
     WHERE group_id = g.group_id
     ORDER BY created_at DESC
     LIMIT 1
@@ -717,9 +717,9 @@ export const getGroupMessages = async (req, res) => {
           JOIN users ru ON mr.user_id = ru.user_id
           WHERE mr.message_id = m.message_id
         ) as reactions
-      FROM messages m
+      FROM group_messages m
       JOIN users u ON m.sender_id = u.user_id
-      LEFT JOIN messages pm ON m.reply_to_message_id = pm.message_id
+      LEFT JOIN group_messages pm ON m.reply_to_message_id = pm.message_id
       LEFT JOIN users pu ON pm.sender_id = pu.user_id
       WHERE m.group_id = $1
       ORDER BY m.created_at ASC
@@ -753,10 +753,34 @@ export const editMessage = async (req, res) => {
 
     if (!text) return res.status(400).json({ message: "Text is required" });
 
+    let tableName = "messages";
+    let msgInfo = await pool.query(
+      "SELECT message_id, group_id, chat_id, sender_id FROM messages WHERE message_id = $1",
+      [messageId],
+    );
+
+    if (msgInfo.rows.length === 0) {
+      tableName = "group_messages";
+      msgInfo = await pool.query(
+        "SELECT message_id, group_id, sender_id FROM group_messages WHERE message_id = $1",
+        [messageId],
+      );
+    }
+
+    if (msgInfo.rows.length === 0) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    const msgMeta = msgInfo.rows[0];
+
+    if (msgMeta.sender_id !== userId) {
+      return res.status(403).json({ message: "Unauthorized to edit this message" });
+    }
+
     const result = await pool.query(
-      `UPDATE messages 
-             SET text = $1, is_edited = TRUE, updated_at = NOW() 
-             WHERE message_id = $2 AND sender_id = $3 AND is_deleted = FALSE 
+      `UPDATE ${tableName}
+             SET text = $1, is_edited = TRUE, updated_at = NOW()
+             WHERE message_id = $2 AND sender_id = $3 AND is_deleted = FALSE
              RETURNING *`,
       [text, messageId, userId],
     );
@@ -802,13 +826,24 @@ export const deleteMessage = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role; // Assuming role is available on req.user
 
-    // Check if message exists
-    const check = await pool.query(
-      "SELECT sender_id FROM messages WHERE message_id = $1",
+    // Check if message exists (DMs + group messages)
+    let tableName = "messages";
+    let check = await pool.query(
+      "SELECT sender_id, group_id, chat_id FROM messages WHERE message_id = $1",
       [messageId],
     );
-    if (check.rows.length === 0)
+
+    if (check.rows.length === 0) {
+      tableName = "group_messages";
+      check = await pool.query(
+        "SELECT sender_id, group_id FROM group_messages WHERE message_id = $1",
+        [messageId],
+      );
+    }
+
+    if (check.rows.length === 0) {
       return res.status(404).json({ message: "Message not found" });
+    }
 
     const msg = check.rows[0];
 
@@ -821,9 +856,9 @@ export const deleteMessage = async (req, res) => {
 
     // Soft delete
     const result = await pool.query(
-      `UPDATE messages 
-             SET is_deleted = TRUE, text = 'This message was deleted', attachment_file_id = NULL, updated_at = NOW() 
-             WHERE message_id = $1 
+      `UPDATE ${tableName}
+             SET is_deleted = TRUE, text = 'This message was deleted', attachment_file_id = NULL, updated_at = NOW()
+             WHERE message_id = $1
              RETURNING *`,
       [messageId],
     );
@@ -1121,10 +1156,18 @@ export const addReaction = async (req, res) => {
 
     if (req.io) {
       // Find if group or private chat
-      const msgInfo = await pool.query(
+      let msgInfo = await pool.query(
         "SELECT group_id, chat_id FROM messages WHERE message_id = $1",
         [messageId],
       );
+
+      if (msgInfo.rowCount === 0) {
+        msgInfo = await pool.query(
+          "SELECT group_id FROM group_messages WHERE message_id = $1",
+          [messageId],
+        );
+      }
+
       if (msgInfo.rowCount > 0) {
         const { group_id, chat_id } = msgInfo.rows[0];
         const room = group_id ? `group_${group_id}` : `chat_${chat_id}`;
@@ -1167,10 +1210,18 @@ export const removeReaction = async (req, res) => {
     );
 
     if (req.io) {
-      const msgInfo = await pool.query(
+      let msgInfo = await pool.query(
         "SELECT group_id, chat_id FROM messages WHERE message_id = $1",
         [messageId],
       );
+
+      if (msgInfo.rowCount === 0) {
+        msgInfo = await pool.query(
+          "SELECT group_id FROM group_messages WHERE message_id = $1",
+          [messageId],
+        );
+      }
+
       if (msgInfo.rowCount > 0) {
         const { group_id, chat_id } = msgInfo.rows[0];
         const room = group_id ? `group_${group_id}` : `chat_${chat_id}`;
