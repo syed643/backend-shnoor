@@ -425,7 +425,7 @@ export const getColleges = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT 
-         u.college AS college_id,
+         u.college AS college,
          u.college AS name,
          COUNT(*) AS student_count
        FROM users u
