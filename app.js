@@ -86,7 +86,7 @@ app.get("/", (req, res) => {
   res.send("API is running 🚀");
 });
 
-app.get("/api/media/:id", serveFile);
+app.get("/api/chats/media/:id", serveFile);
 
 const userSockets = new Map(); // Map<userId, socketId>
 
@@ -183,7 +183,7 @@ io.on("connection", (socket) => {
           sender_uid: senderUid,
           sender_name: senderName,
           attachment_url: savedMsg.attachment_file_id
-            ? `${baseUrl}/api/media/${savedMsg.attachment_file_id}`
+            ? `${baseUrl}/api/chats/media/${savedMsg.attachment_file_id}`
             : null,
         };
 
@@ -251,7 +251,7 @@ io.on("connection", (socket) => {
           sender_uid: senderUid,
           sender_name: senderName,
           attachment_url: savedMsg.attachment_file_id
-            ? `${baseUrl}/api/media/${savedMsg.attachment_file_id}`
+            ? `${baseUrl}/api/chats/media/${savedMsg.attachment_file_id}`
             : null,
         };
 
