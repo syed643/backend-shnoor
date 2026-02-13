@@ -103,55 +103,6 @@ export const getGroups = async (req, res) => {
       FROM groups g
       ORDER BY g.created_at DESC`;
 
-    // Try to add college groups if the view exists
-    try {
-      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-      query = `
-        SELECT g.group_id, g.group_name, g.start_date, g.end_date, g.created_by, g.created_at,
-               CASE 
-                 WHEN g.created_by IS NOT NULL THEN (
-                   SELECT COUNT(*)::int FROM group_users gu WHERE gu.group_id = g.group_id
-                 )
-                 WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NOT NULL THEN (
-                   SELECT COUNT(*)::int
-                   FROM users u
-                   WHERE u.created_at >= g.start_date
-                     AND u.created_at <= g.end_date
-                     AND u.role = 'student' AND u.status='active'
-                     AND (u.headline IS NULL OR u.headline = '')
-                 )
-                 WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NULL THEN (
-                   SELECT COUNT(*)::int FROM group_users gu WHERE gu.group_id = g.group_id
-                 )
-                 ELSE (
-                   SELECT COUNT(*)::int
-                   FROM users u
-                   WHERE UPPER(u.headline) = UPPER(g.group_name)
-                     AND u.role = 'student'
-                      AND u.status = 'active'
-                 )
-               END AS user_count
-        FROM groups g
-        UNION ALL
-        SELECT cg.group_id,
-               cg.group_name,
-               cg.start_date,
-               cg.end_date,
-               NULL AS created_by,
-               cg.created_at,
-               (
-                 SELECT COUNT(*)::int
-                 FROM users u
-                 WHERE UPPER(TRIM(u.headline)) = UPPER(TRIM(cg.group_name))
-                   AND u.role = 'student'
-                    AND u.status = 'active'
-               ) AS user_count
-        FROM college_groups cg
-        ORDER BY created_at DESC`;
-    } catch (e) {
-      console.log("College groups view not available:", e.message);
-    }
-
     const result = await pool.query(query);
     console.log("Groups fetched:", result.rows.length);
 
@@ -227,32 +178,6 @@ export const getGroup = async (req, res) => {
         group.user_count = userCountResult.rows[0].user_count;
         return res.status(200).json(group);
       }
-    }
-
-    // Check if it's a college group from the view
-    try {
-      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-      const collegeResult = await pool.query(
-        `SELECT group_id, group_name, start_date, end_date, created_at
-         FROM college_groups WHERE group_id = $1`,
-        [groupId],
-      );
-
-      if (collegeResult.rows.length > 0) {
-        const group = collegeResult.rows[0];
-        group.created_by = null;
-        // Add user_count - use exact match since college_groups.group_name is the actual college name
-        const userCountResult = await pool.query(
-          `SELECT COUNT(*)::int AS user_count
-           FROM users u
-           WHERE u.headline = $1 AND u.role = 'student' AND u.status = 'active'`,
-          [group.group_name],
-        );
-        group.user_count = userCountResult.rows[0].user_count;
-        return res.status(200).json(group);
-      }
-    } catch (e) {
-      console.log("College groups view not available:", e.message);
     }
 
     return res.status(404).json({ message: "Group not found" });
@@ -339,35 +264,9 @@ export const getGroupUsers = async (req, res) => {
         );
         return res.status(200).json(result.rows);
       }
-    } else {
-      // Check if it's a college group from the view
-      try {
-        await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-        const collegeCheck = await pool.query(
-          `SELECT group_name FROM college_groups WHERE group_id = $1`,
-          [groupId],
-        );
-        if (collegeCheck.rows.length > 0) {
-          const collegeName = collegeCheck.rows[0].group_name;
-          // Use exact match since college_groups.group_name is the actual college name
-          const result = await pool.query(
-            `SELECT
-               u.user_id,
-               u.full_name,
-               u.email,
-               u.created_at AS assigned_at
-             FROM users u
-             WHERE u.headline = $1 AND u.role = 'student' AND u.status = 'active'
-             ORDER BY u.created_at`,
-            [collegeName],
-          );
-          return res.status(200).json(result.rows);
-        }
-      } catch (e) {
-        console.log("College groups view not available:", e.message);
-      }
-      return res.status(404).json({ message: "Group not found" });
     }
+
+    return res.status(404).json({ message: "Group not found" });
   } catch (error) {
     console.error("getGroupUsers error:", error);
     res.status(500).json({ message: "Server error" });
@@ -386,39 +285,7 @@ export const addUserToGroup = async (req, res) => {
       [groupId],
     );
     if (groupCheck.rows.length === 0) {
-      // Check college view
-      try {
-        await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-        const collegeCheck = await pool.query(
-          `SELECT group_name FROM college_groups WHERE group_id = $1`,
-          [groupId],
-        );
-        if (collegeCheck.rows.length === 0) {
-          return res.status(404).json({ message: "Group not found" });
-        }
-        // It's college group from view - update user's college name to exact match
-        // Only allow adding ACTIVE students
-        const groupName = collegeCheck.rows[0].group_name;
-        const updateResult = await pool.query(
-          `UPDATE users
-           SET "headline/college_name" = $1
-           WHERE user_id = $2 AND role = 'student' AND status = 'active'`,
-          [groupName, userId],
-        );
-        if (updateResult.rowCount === 0) {
-          return res.status(400).json({
-            message: "Only active students can be added to college groups",
-          });
-        }
-        return res
-          .status(200)
-          .json({ message: "Student added to college group" });
-      } catch (e) {
-        console.log("College groups view not available:", e.message);
-        return res
-          .status(400)
-          .json({ message: "College groups not supported" });
-      }
+      return res.status(404).json({ message: "Group not found" });
     }
 
     const {
@@ -475,30 +342,7 @@ export const removeUserFromGroup = async (req, res) => {
       [groupId],
     );
     if (groupCheck.rows.length === 0) {
-      // Check college view
-      try {
-        await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-        const collegeCheck = await pool.query(
-          `SELECT group_name FROM college_groups WHERE group_id = $1`,
-          [groupId],
-        );
-        if (collegeCheck.rows.length === 0) {
-          return res.status(404).json({ message: "Group not found" });
-        }
-        // It's college group from view
-        await pool.query(
-          `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student' AND status = 'active'`,
-          [userId],
-        );
-        return res
-          .status(200)
-          .json({ message: "Student removed from college group" });
-      } catch (e) {
-        console.log("College groups view not available:", e.message);
-        return res
-          .status(400)
-          .json({ message: "College groups not supported" });
-      }
+      return res.status(404).json({ message: "Group not found" });
     }
 
     const { created_by, start_date, end_date } = groupCheck.rows[0];
