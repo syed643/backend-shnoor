@@ -477,7 +477,7 @@ const result = await pool.query(
   FROM college_groups g
   JOIN clg_group_members gm ON g.group_id = gm.group_id
   LEFT JOIN LATERAL (
-    SELECT text
+    SELECT message AS text
     FROM group_messages
     WHERE group_id = g.group_id
     ORDER BY created_at DESC
@@ -699,11 +699,12 @@ export const getGroupMessages = async (req, res) => {
     const result = await pool.query(
       `
       SELECT 
-        m.*, 
+        m.*,
+        m.message AS text,
         u.firebase_uid as sender_uid,
         u.full_name as sender_name, 
         u.photo_url as sender_photo,
-        pm.text as parent_message_text,
+        pm.message as parent_message_text,
         pu.full_name as parent_message_sender_name,
         (
           SELECT json_agg(
@@ -777,9 +778,11 @@ export const editMessage = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized to edit this message" });
     }
 
+    const messageColumn = tableName === "group_messages" ? "message" : "text";
+
     const result = await pool.query(
       `UPDATE ${tableName}
-             SET text = $1, is_edited = TRUE, updated_at = NOW()
+             SET ${messageColumn} = $1, is_edited = TRUE, updated_at = NOW()
              WHERE message_id = $2 AND sender_id = $3 AND is_deleted = FALSE
              RETURNING *`,
       [text, messageId, userId],
@@ -855,9 +858,11 @@ export const deleteMessage = async (req, res) => {
     }
 
     // Soft delete
+    const messageColumn = tableName === "group_messages" ? "message" : "text";
+
     const result = await pool.query(
       `UPDATE ${tableName}
-             SET is_deleted = TRUE, text = 'This message was deleted', attachment_file_id = NULL, updated_at = NOW()
+             SET is_deleted = TRUE, ${messageColumn} = 'This message was deleted', attachment_file_id = NULL, updated_at = NOW()
              WHERE message_id = $1
              RETURNING *`,
       [messageId],

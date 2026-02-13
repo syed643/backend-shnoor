@@ -136,10 +136,11 @@ io.on("connection", (socket) => {
         
         const isAdminGroup = groupCheck.rows.length > 0;
         const tableName = isAdminGroup ? 'admin_group_messages' : 'group_messages';
+        const messageColumn = isAdminGroup ? 'text' : 'message';
         
         const result = await pool.query(
-          `INSERT INTO ${tableName} (
-                group_id, sender_id, text, 
+              `INSERT INTO ${tableName} (
+                group_id, sender_id, ${messageColumn}, 
                 attachment_file_id, attachment_type, attachment_name,
                 reply_to_message_id
             ) 
@@ -161,6 +162,7 @@ io.on("connection", (socket) => {
         // Construct Payload with File URL if needed
         const payload = {
           ...savedMsg,
+          text: savedMsg.text ?? savedMsg.message ?? text ?? "",
           sender_uid: senderUid,
           sender_name: senderName,
           attachment_url: savedMsg.attachment_file_id
