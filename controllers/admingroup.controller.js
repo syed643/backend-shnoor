@@ -3,23 +3,64 @@ import pool from '../db/postgres.js';
 
 // 1. Create new group (only admin)
 export const createGroup = async (req, res) => {
+  const client = await pool.connect();
+  
   try {
-    const adminId = req.user?.uid || req.user?.id; // handle both Firebase/JWT
-    if (!adminId) return res.status(401).json({ message: 'Unauthorized' });
+    await client.query('BEGIN');
 
-    const { name, description } = req.body;
+    const firebaseUid = req.firebase?.uid;
+    if (!firebaseUid) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { name, description, studentIds } = req.body;
 
     if (!name?.trim()) return res.status(400).json({ message: 'Group name required' });
 
-    const result = await pool.query(
-      'INSERT INTO admin_groups (admin_id, name, description) VALUES ($1, $2, $3) RETURNING group_id',
+    // Get admin's internal user_id
+    const adminRes = await client.query(
+      'SELECT user_id FROM users WHERE firebase_uid = $1 AND role = $2',
+      [firebaseUid, 'admin']
+    );
+
+    if (adminRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'Admin access only' });
+    }
+
+    const adminId = adminRes.rows[0].user_id;
+
+    // Create group
+    const groupRes = await client.query(
+      'INSERT INTO admin_groups (admin_id, name, description, created_at) VALUES ($1, $2, $3, NOW()) RETURNING group_id',
       [adminId, name.trim(), description?.trim() || null]
     );
 
-    res.status(201).json({ group_id: result.rows[0].group_id });
+    const groupId = groupRes.rows[0].group_id;
+
+    // Add members if studentIds provided
+    let memberCount = 0;
+    if (studentIds && Array.isArray(studentIds) && studentIds.length > 0) {
+      const values = studentIds.map(id => `('${groupId}', '${id}', 'member')`).join(', ');
+      await client.query(
+        `INSERT INTO admin_group_members (group_id, user_id, role_in_group)
+         VALUES ${values}
+         ON CONFLICT (group_id, user_id) DO NOTHING`
+      );
+      memberCount = studentIds.length;
+    }
+
+    await client.query('COMMIT');
+
+    res.status(201).json({ 
+      group_id: groupId,
+      name,
+      member_count: memberCount
+    });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('createGroup error:', err);
     res.status(500).json({ message: 'Failed to create group' });
+  } finally {
+    client.release();
   }
 };
 
