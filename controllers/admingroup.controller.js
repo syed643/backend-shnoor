@@ -594,3 +594,66 @@ export const getStudentsByCollege = async (req, res) => {
     res.status(500).json({ message: 'Failed to load students' });
   }
 };
+
+export const getAdminGroupMembers = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const firebaseUid = req.firebase?.uid;
+
+    if (!firebaseUid) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const userLookup = await pool.query(
+      "SELECT user_id FROM users WHERE firebase_uid = $1",
+      [firebaseUid],
+    );
+
+    if (userLookup.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const userId = userLookup.rows[0].user_id;
+
+    const groupQuery = await pool.query(
+      "SELECT admin_id FROM admin_groups WHERE group_id = $1",
+      [groupId],
+    );
+
+    if (groupQuery.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    const isGroupAdmin = groupQuery.rows[0].admin_id === userId;
+
+    if (!isGroupAdmin) {
+      const membership = await pool.query(
+        "SELECT 1 FROM admin_group_members WHERE group_id = $1 AND user_id = $2",
+        [groupId, userId],
+      );
+      if (membership.rows.length === 0) {
+        return res.status(403).json({ message: "You are not a member of this group" });
+      }
+    }
+
+    const membersQuery = await pool.query(
+      `SELECT
+         u.user_id AS id,
+         u.full_name AS name,
+         u.role AS global_role,
+         gm.role_in_group AS group_role,
+         u.photo_url,
+         u.email
+       FROM admin_group_members gm
+       JOIN users u ON gm.user_id = u.user_id
+       WHERE gm.group_id = $1
+       ORDER BY u.full_name ASC`,
+      [groupId],
+    );
+
+    return res.status(200).json(membersQuery.rows);
+  } catch (err) {
+    console.error("getAdminGroupMembers error:", err);
+    return res.status(500).json({ message: "Failed to load group members" });
+  }
+};

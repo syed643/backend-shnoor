@@ -12,6 +12,7 @@ import {
   promoteToLeader,
   sendGroupMessage,
   getGroupMessages,
+  getAdminGroupMembers,
   getGroupById,
   getAllGroups,
   createGroupByCollege,
@@ -39,6 +40,7 @@ router.get('/students-by-college', firebaseAuth, getStudentsByCollege);
 // Group messaging routes
 router.get('/:groupId', firebaseAuth, getGroupById);
 router.get('/:groupId/messages', firebaseAuth, getGroupMessages);
+router.get('/:groupId/members', firebaseAuth, getAdminGroupMembers);
 
 router.post('/:groupId/messages', firebaseAuth, sendGroupMessage);
 
