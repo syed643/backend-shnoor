@@ -84,6 +84,7 @@ export const initChatTables = async () => {
       "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE",
       "ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
       "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_message_id UUID REFERENCES messages(message_id) ON DELETE SET NULL",
+      "ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_message_id UUID REFERENCES group_messages(message_id) ON DELETE SET NULL",
     ];
 
     // Reactions Table
