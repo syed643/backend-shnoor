@@ -119,10 +119,12 @@ export const getStudentGroups = async (req, res) => {
          g.purpose,
          g.created_at,
          g.admin_id,
-         COUNT(gm.user_id) AS member_count
+         COUNT(gm_all.user_id) AS member_count
        FROM admin_groups g
-       JOIN admin_group_members gm ON g.group_id = gm.group_id
-       WHERE gm.user_id = $1
+       JOIN admin_group_members gm_user
+         ON g.group_id = gm_user.group_id AND gm_user.user_id = $1
+       LEFT JOIN admin_group_members gm_all
+         ON g.group_id = gm_all.group_id
        GROUP BY g.group_id
        ORDER BY g.created_at DESC`,
       [internalUserId]
