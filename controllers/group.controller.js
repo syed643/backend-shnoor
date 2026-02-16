@@ -1,56 +1,76 @@
 import pool from "../db/postgres.js";
 
+const normalizeCollegeName = (name) => {
+  if (!name) return '';
+  return name
+    .toUpperCase()
+    .trim()
+    .replace(/[,.\-_()]/g, ' ') // Replace special chars with space
+    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+    .trim();
+};
+
 export const createGroup = async (req, res) => {
-  const { group_name, start_date, end_date } = req.body;
+  const { group_name, group_type, start_date, end_date } = req.body;
 
   if (!group_name) {
     return res.status(400).json({ message: "Group name is required" });
   }
 
-  // For timestamp groups, require dates
-  if (start_date || end_date) {
+  if (!group_type || !['timestamp', 'manual', 'college'].includes(group_type)) {
+    return res.status(400).json({ message: "Valid group_type is required: 'timestamp', 'manual', or 'college'" });
+  }
+
+  // Validate dates based on group type
+  if (group_type === 'timestamp') {
     if (!start_date || !end_date) {
-      return res.status(400).json({
-        message:
-          "Both start date and end date are required for timestamp groups",
-      });
+      return res.status(400).json({ message: "Both start date and end date are required for timestamp groups" });
     }
     if (new Date(start_date) >= new Date(end_date)) {
-      return res
-        .status(400)
-        .json({ message: "Start date must be before end date" });
+      return res.status(400).json({ message: "Start date must be before end date" });
+    }
+  } else if (group_type === 'college' || group_type === 'manual') {
+    if (start_date || end_date) {
+      return res.status(400).json({ message: `No dates should be provided for ${group_type} groups` });
     }
   }
 
-  const normalizedName = group_name.toUpperCase();
+  const normalizedName = group_name
+    .toUpperCase()
+    .trim();
 
   try {
     // Check if group with same name already exists
     const existing = await pool.query(
-      `SELECT group_id FROM groups WHERE UPPER(group_name) = $1`,
-      [normalizedName],
+      `SELECT group_id FROM groups WHERE 
+        REGEXP_REPLACE(UPPER(TRIM(group_name)), '[,.\\-_() ]+', ' ', 'g') = 
+        REGEXP_REPLACE($1, '[,.\\-_() ]+', ' ', 'g')`,
+      [normalizedName]
     );
 
     if (existing.rows.length > 0) {
-      return res
-        .status(409)
-        .json({ message: "A group with the same name already exists" });
+      return res.status(409).json({ message: "A group with the same name already exists" });
     }
 
-    // CRITICAL FIX: For timestamp groups (both dates provided), created_by must be NULL
-    // For manual groups (no dates), created_by should be the admin's ID
-    const createdBy = start_date && end_date ? null : req.user?.id || null;
+    // Determine created_by based on group type
+    const createdBy = (group_type === 'manual') ? (req.user?.id || null) : null;
 
     const result = await pool.query(
       `INSERT INTO groups (group_name, start_date, end_date, created_by)
        VALUES ($1, $2, $3, $4)
        RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
-      [normalizedName, start_date || null, end_date || null, createdBy],
+      [
+        normalizedName,
+        (group_type === 'timestamp') ? start_date : null,
+        (group_type === 'timestamp') ? end_date : null,
+        createdBy
+      ]
     );
 
     const group = result.rows[0];
+    console.log(`Group created: type=${group_type}, name=${group_name}`);
 
-    res.status(201).json(group);
+    res.status(201).json({ ...group, group_type });
   } catch (error) {
     console.error("createGroup error:", error);
     res.status(500).json({ message: "Server error" });
@@ -60,59 +80,63 @@ export const createGroup = async (req, res) => {
 export const getGroups = async (req, res) => {
   try {
     console.log("Fetching groups...");
-    let query = `
-      SELECT g.group_id, g.group_name, g.start_date, g.end_date, g.created_by, g.created_at,
-             CASE 
--- Manual groups: count from group_users (only active students)
-               WHEN g.created_by IS NOT NULL THEN (
-                 SELECT COUNT(*)::int 
-                 FROM group_users gu 
-                 JOIN users u ON gu.user_id = u.user_id
-                 WHERE gu.group_id = g.group_id
-                   AND u.status = 'active'
-                   AND u.role = 'student'
-               )
-               -- Timestamp groups: date-based cohorts (no college)
-               WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NOT NULL THEN (
-                 SELECT COUNT(*)::int
-                 FROM users u
-                 WHERE u.created_at >= g.start_date
-                   AND u.created_at <= g.end_date
-                   AND u.role = 'student'
-                   AND u.status = 'active'
-                   AND (u.headline IS NULL OR u.headline = '')
-               )
-         -- College manual groups (admin-created, date-open, active students only)
-               WHEN g.created_by IS NULL AND g.start_date IS NOT NULL AND g.end_date IS NULL THEN (
-                 SELECT COUNT(*)::int 
-                 FROM group_users gu 
-                 JOIN users u ON gu.user_id = u.user_id
-                 WHERE gu.group_id = g.group_id
-                   AND u.status = 'active'
-                   AND u.role = 'student'
-               )
-               -- Automatic college groups from groups table
-               ELSE (
-                 SELECT COUNT(*)::int
-                 FROM users u
-                 WHERE UPPER(u.headline) = UPPER(g.group_name)
-                   AND u.role = 'student'
-                  AND u.status = 'active'
-               )
-             END AS user_count
+    const query = `
+      SELECT 
+        g.group_id, 
+        g.group_name, 
+        g.start_date, 
+        g.end_date, 
+        g.created_by, 
+        g.created_at,
+        CASE 
+          -- Manual groups (created_by IS NOT NULL): count from group_users
+          WHEN g.created_by IS NOT NULL THEN (
+            SELECT COUNT(*)::int 
+            FROM group_users gu 
+            JOIN users u ON gu.user_id = u.user_id
+            WHERE gu.group_id = g.group_id
+              AND u.status = 'active'
+              AND u.role = 'student'
+          )
+          -- Timestamp groups (start_date and end_date NOT NULL): count by registration date
+          WHEN g.start_date IS NOT NULL AND g.end_date IS NOT NULL THEN (
+            SELECT COUNT(*)::int
+            FROM users u
+            WHERE u.created_at >= g.start_date
+              AND u.created_at <= g.end_date
+              AND u.role = 'student'
+              AND u.status = 'active'
+          )
+          -- College groups (both dates NULL and created_by NULL): count by college_name (normalized)
+          ELSE (
+            SELECT COUNT(*)::int
+            FROM users u
+            WHERE u."college" IS NOT NULL
+              AND REGEXP_REPLACE(UPPER(TRIM(u."college")), '[,.\\-_() ]+', ' ', 'g') 
+                 = REGEXP_REPLACE(UPPER(TRIM(g.group_name)), '[,.\\-_() ]+', ' ', 'g')
+              AND u.role = 'student'
+              AND u.status = 'active'
+          )
+        END AS user_count
       FROM groups g
-      ORDER BY g.created_at DESC`;
+      ORDER BY g.created_at DESC
+    `;
 
     const result = await pool.query(query);
     console.log("Groups fetched:", result.rows.length);
 
-    // For manual groups (created_by not null) that don't use timestamp logic,
-    // send start_date as the group creation time so the frontend doesn't see 1970-01-01.
-    const groupsWithDisplayDates = result.rows.map((g) =>
-      g.created_by && !g.start_date ? { ...g, start_date: g.created_at } : g,
-    );
+    // Add group_type to response
+    const groupsWithType = result.rows.map((g) => {
+      let group_type = 'college'; // default
+      if (g.created_by) {
+        group_type = 'manual';
+      } else if (g.start_date && g.end_date) {
+        group_type = 'timestamp';
+      }
+      return { ...g, group_type };
+    });
 
-    res.status(200).json(groupsWithDisplayDates);
+    res.status(200).json(groupsWithType);
   } catch (error) {
     console.error("getGroups error:", error);
     res.status(500).json({ message: "Server error" });
@@ -120,153 +144,148 @@ export const getGroups = async (req, res) => {
 };
 
 export const getGroup = async (req, res) => {
-  const { groupId } = req.params;
+  const { id } = req.params;
+
+  console.log('getGroup called with id:', id);
+
+  if (!id) {
+    return res.status(400).json({ message: "Group ID is required" });
+  }
 
   try {
-    // Check if it's a manual group
     const groupResult = await pool.query(
       `SELECT group_id, group_name, start_date, end_date, created_by, created_at
        FROM groups WHERE group_id = $1`,
-      [groupId],
+      [id]
     );
 
-    if (groupResult.rows.length > 0) {
-      const group = groupResult.rows[0];
-      if (group.created_by) {
-        // Manual group (random/college-like manual groups)
-        // If no start_date stored, expose created_at as start_date for display purposes
-        if (!group.start_date) {
-          group.start_date = group.created_at;
-        }
-        const userCountResult = await pool.query(
-          `SELECT COUNT(*)::int AS user_count FROM group_users WHERE group_id = $1`,
-          [groupId],
-        );
-        group.user_count = userCountResult.rows[0].user_count;
-        return res.status(200).json(group);
-      } else if (group.start_date && group.end_date) {
-        // Timestamp group: count users who either (a) were registered within the date window
-        // OR (b) are explicitly assigned in `group_users` (fallback/manual override).
-        const userCountResult = await pool.query(
-          `SELECT COUNT(DISTINCT u.user_id)::int AS user_count
-           FROM users u
-           LEFT JOIN group_users gu ON gu.user_id = u.user_id AND gu.group_id = $3
-           WHERE (
-             (u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND u.status = 'active' AND (u.headline IS NULL OR u.headline = ''))
-             OR gu.group_id = $3
-           )`,
-          [group.start_date, group.end_date, group.group_id],
-        );
-        group.user_count = userCountResult.rows[0].user_count;
-        return res.status(200).json(group);
-      } else if (group.start_date && !group.end_date) {
-        // College manual group
-        const userCountResult = await pool.query(
-          `SELECT COUNT(*)::int AS user_count FROM group_users WHERE group_id = $1`,
-          [groupId],
-        );
-        group.user_count = userCountResult.rows[0].user_count;
-        return res.status(200).json(group);
-      } else {
-        // College automatic group (from groups table)
-        const userCountResult = await pool.query(
-          `SELECT COUNT(*)::int AS user_count
-           FROM users u
-           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student' AND u.status = 'active'`,
-          [group.group_name],
-        );
-        group.user_count = userCountResult.rows[0].user_count;
-        return res.status(200).json(group);
-      }
+    if (groupResult.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
     }
 
-    return res.status(404).json({ message: "Group not found" });
+    const group = groupResult.rows[0];
+    let group_type = 'college'; // default
+
+    if (group.created_by) {
+      // MANUAL GROUP
+      group_type = 'manual';
+      const userCountResult = await pool.query(
+        `SELECT COUNT(*)::int AS user_count 
+         FROM group_users gu
+         JOIN users u ON gu.user_id = u.user_id
+         WHERE gu.group_id = $1
+           AND u.status = 'active'
+           AND u.role = 'student'`,
+        [id]
+      );
+      group.user_count = userCountResult.rows[0].user_count;
+    } else if (group.start_date && group.end_date) {
+      // TIMESTAMP GROUP
+      group_type = 'timestamp';
+      const userCountResult = await pool.query(
+        `SELECT COUNT(*)::int AS user_count
+         FROM users u
+         WHERE u.created_at >= $1 
+           AND u.created_at <= $2 
+           AND u.role = 'student' 
+           AND u.status = 'active'`,
+        [group.start_date, group.end_date]
+      );
+      group.user_count = userCountResult.rows[0].user_count;
+    } else {
+      // COLLEGE GROUP
+      group_type = 'college';
+      const userCountResult = await pool.query(
+        `SELECT COUNT(*)::int AS user_count
+         FROM users u
+         WHERE u."college" IS NOT NULL
+           AND REGEXP_REPLACE(UPPER(TRIM(u."college")), '[,.\\-_() ]+', ' ', 'g') 
+              = REGEXP_REPLACE(UPPER(TRIM($1)), '[,.\\-_() ]+', ' ', 'g')
+           AND u.role = 'student'
+           AND u.status = 'active'`,
+        [group.group_name]
+      );
+      group.user_count = userCountResult.rows[0].user_count;
+    }
+
+    console.log('Group fetched successfully:', group.group_id);
+    res.status(200).json({ ...group, group_type });
   } catch (error) {
     console.error("getGroup error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 export const getGroupUsers = async (req, res) => {
-  const { groupId } = req.params;
+  const { id } = req.params;
 
   try {
-    // Check if it's a manual group
     const groupCheck = await pool.query(
       `SELECT group_name, start_date, end_date, created_by FROM groups WHERE group_id = $1`,
-      [groupId],
+      [id]
     );
-    if (groupCheck.rows.length > 0) {
-      const { start_date, end_date, created_by } = groupCheck.rows[0];
-      if (created_by) {
-        // Manual group
-        const result = await pool.query(
-          `SELECT
-             u.user_id,
-             u.full_name,
-             u.email,
-             gu.assigned_at,
-             gu.start_date,
-             gu.end_date
-           FROM group_users gu
-           JOIN users u ON gu.user_id = u.user_id
-           WHERE gu.group_id = $1
-           ORDER BY gu.assigned_at`,
-          [groupId],
-        );
-        return res.status(200).json(result.rows);
-      } else if (start_date && end_date) {
-        // Timestamp group: include both users whose created_at falls in the window
-        // and users explicitly present in `group_users` for this group.
-        const result = await pool.query(
-          `SELECT DISTINCT u.user_id,
-                           u.full_name,
-                           u.email,
-                           COALESCE(gu.assigned_at, u.created_at) AS assigned_at
-           FROM users u
-           LEFT JOIN group_users gu ON gu.user_id = u.user_id AND gu.group_id = $3
-           WHERE ((u.created_at >= $1 AND u.created_at <= $2 AND u.role = 'student' AND (u.headline IS NULL OR u.headline = '') AND u.status = 'active')
-                  OR gu.group_id = $3)
-           ORDER BY assigned_at`,
-          [start_date, end_date, groupId],
-        );
-        return res.status(200).json(result.rows);
-      } else if (start_date && !end_date) {
-        // College manual group
-        const result = await pool.query(
-          `SELECT
-             u.user_id,
-             u.full_name,
-             u.email,
-             gu.assigned_at,
-             gu.start_date,
-             gu.end_date
-           FROM group_users gu
-           JOIN users u ON gu.user_id = u.user_id
-           WHERE gu.group_id = $1
-           ORDER BY gu.assigned_at`,
-          [groupId],
-        );
-        return res.status(200).json(result.rows);
-      } else {
-        // College automatic group (from groups table)
-        const collegeName = groupCheck.rows[0].group_name;
-        const result = await pool.query(
-          `SELECT
-             u.user_id,
-             u.full_name,
-             u.email,
-             u.created_at AS assigned_at
-           FROM users u
-           WHERE UPPER(u.headline) = UPPER($1) AND u.role = 'student' AND u.status = 'active'
-           ORDER BY u.created_at`,
-          [collegeName],
-        );
-        return res.status(200).json(result.rows);
-      }
+
+    if (groupCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
     }
 
-    return res.status(404).json({ message: "Group not found" });
+    const { group_name, start_date, end_date, created_by } = groupCheck.rows[0];
+
+    if (created_by) {
+      // MANUAL GROUP: Get students from group_users table
+      const result = await pool.query(
+        `SELECT
+           u.user_id,
+           u.full_name,
+           u.email,
+           gu.assigned_at,
+           gu.start_date,
+           gu.end_date
+         FROM group_users gu
+         JOIN users u ON gu.user_id = u.user_id
+         WHERE gu.group_id = $1
+           AND u.status = 'active'
+           AND u.role = 'student'
+         ORDER BY gu.assigned_at`,
+        [id]
+      );
+      return res.status(200).json(result.rows);
+    } else if (start_date && end_date) {
+      // TIMESTAMP GROUP: Get students by registration date (created_at)
+      const result = await pool.query(
+        `SELECT
+           u.user_id,
+           u.full_name,
+           u.email,
+           u.created_at AS assigned_at
+         FROM users u
+         WHERE u.created_at >= $1 
+           AND u.created_at <= $2 
+           AND u.role = 'student' 
+           AND u.status = 'active'
+         ORDER BY u.created_at`,
+        [start_date, end_date]
+      );
+      return res.status(200).json(result.rows);
+    } else {
+      // COLLEGE GROUP: Get students by college_name (normalized)
+      const result = await pool.query(
+        `SELECT
+           u.user_id,
+           u.full_name,
+           u.email,
+           u.created_at AS assigned_at
+         FROM users u
+         WHERE u."college" IS NOT NULL
+           AND REGEXP_REPLACE(UPPER(TRIM(u."college")), '[,.\\-_() ]+', ' ', 'g')
+              = REGEXP_REPLACE(UPPER(TRIM($1)), '[,.\\-_() ]+', ' ', 'g')
+           AND u.role = 'student'
+           AND u.status = 'active'
+         ORDER BY u.created_at`,
+        [group_name]
+      );
+      return res.status(200).json(result.rows);
+    }
   } catch (error) {
     console.error("getGroupUsers error:", error);
     res.status(500).json({ message: "Server error" });
@@ -274,58 +293,74 @@ export const getGroupUsers = async (req, res) => {
 };
 
 export const addUserToGroup = async (req, res) => {
-  const { groupId, userId } = req.params;
-  // Safely handle cases where there is no request body (e.g. manual selection without dates)
+  const { id, userId } = req.params;
   const { start_date, end_date } = req.body || {};
 
   try {
-    // Check if group is college group (created_by null)
     const groupCheck = await pool.query(
       `SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`,
-      [groupId],
+      [id]
     );
+
     if (groupCheck.rows.length === 0) {
       return res.status(404).json({ message: "Group not found" });
     }
 
-    const {
-      created_by,
-      start_date: groupStartDate,
-      end_date: groupEndDate,
-    } = groupCheck.rows[0];
-    if (created_by || (groupStartDate && !groupEndDate)) {
-      // Manual or college manual group
+    const { created_by, start_date: groupStartDate, end_date: groupEndDate } = groupCheck.rows[0];
+
+    // Check if user exists and is an active student
+    const userCheck = await pool.query(
+      `SELECT user_id, created_at FROM users WHERE user_id = $1 AND role = 'student' AND status = 'active'`,
+      [userId]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(400).json({ message: "Only active students can be added to groups" });
+    }
+
+    const user = userCheck.rows[0];
+
+    if (created_by) {
+      // MANUAL GROUP: Add to group_users table
       await pool.query(
         `INSERT INTO group_users (group_id, user_id, assigned_at, start_date, end_date)
          VALUES ($1, $2, NOW(), $3, $4)
          ON CONFLICT (group_id, user_id)
          DO UPDATE SET start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
-        [groupId, userId, start_date || null, end_date || null],
+        [id, userId, start_date || null, end_date || null]
       );
-      return res.status(200).json({ message: "Student added to group" });
-    }
+      return res.status(200).json({ message: "Student added to manual group" });
+    } else if (groupStartDate && groupEndDate) {
+      // TIMESTAMP GROUP: Validate user's created_at is within the range
+      if (user.created_at < new Date(groupStartDate) || user.created_at > new Date(groupEndDate)) {
+        return res.status(400).json({
+          message: `Student registration date (${user.created_at.toISOString()}) does not fall within the group's date range (${groupStartDate} to ${groupEndDate})`
+        });
+      }
+      // Add to group_users for management purposes
+      await pool.query(
+        `INSERT INTO group_users (group_id, user_id, assigned_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (group_id, user_id) DO NOTHING`,
+        [id, userId]
+      );
+      return res.status(200).json({ message: "Student added to timestamp group (date validated)" });
+    } else {
+      // COLLEGE GROUP: Update user's college_name
+      const groupName = groupCheck.rows[0].group_name;
+      const updateResult = await pool.query(
+        `UPDATE users
+         SET "college" = $1
+         WHERE user_id = $2 AND role = 'student' AND status = 'active'`,
+        [groupName, userId]
+      );
 
-    if (groupStartDate && groupEndDate) {
-      // Timestamp group, cannot manually add
-      return res.status(400).json({
-        message: "Cannot manually add students to timestamp-based groups",
-      });
-    }
+      if (updateResult.rowCount === 0) {
+        return res.status(400).json({ message: "Failed to add student to college group" });
+      }
 
-    // College automatic group from groups table
-    const groupName = groupCheck.rows[0].group_name;
-    const updateResult = await pool.query(
-      `UPDATE users
-       SET headline = $1
-       WHERE user_id = $2 AND role = 'student' AND status = 'active'`,
-      [groupName, userId],
-    );
-    if (updateResult.rowCount === 0) {
-      return res.status(400).json({
-        message: "Only active students can be added to college groups",
-      });
+      return res.status(200).json({ message: "Student added to college group" });
     }
-    return res.status(200).json({ message: "Student added to college group" });
   } catch (error) {
     console.error("addUserToGroup error:", error);
     res.status(500).json({ message: "Server error" });
@@ -333,43 +368,63 @@ export const addUserToGroup = async (req, res) => {
 };
 
 export const removeUserFromGroup = async (req, res) => {
-  const { groupId, userId } = req.params;
+  const { id, userId } = req.params;
 
   try {
-    // Check if group is college group
     const groupCheck = await pool.query(
-      `SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`,
-      [groupId],
+      `SELECT created_by, start_date, end_date, group_name FROM groups WHERE group_id = $1`,
+      [id]
     );
+
     if (groupCheck.rows.length === 0) {
       return res.status(404).json({ message: "Group not found" });
     }
 
-    const { created_by, start_date, end_date } = groupCheck.rows[0];
-    if (created_by || (start_date && !end_date)) {
-      // Manual or college manual group
+    const { created_by, start_date, end_date, group_name } = groupCheck.rows[0];
+
+    if (created_by) {
+      // MANUAL GROUP: Remove from group_users table
       await pool.query(
         `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
-        [groupId, userId],
+        [id, userId]
       );
-      return res.status(200).json({ message: "Student removed from group" });
-    }
+      return res.status(200).json({ message: "Student removed from manual group" });
+    } else if (start_date && end_date) {
+      // TIMESTAMP GROUP: Remove from group_users table
+      await pool.query(
+        `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
+        [id, userId]
+      );
+      return res.status(200).json({ message: "Student removed from timestamp group" });
+    } else {
+      // COLLEGE GROUP: Remove by clearing the college field for this user
+      const userCheck = await pool.query(
+        `SELECT "college" FROM users WHERE user_id = $1 AND role = 'student' AND status = 'active'`,
+        [userId]
+      );
 
-    if (start_date && end_date) {
-      // Timestamp group, cannot manually remove
-      return res.status(400).json({
-        message: "Cannot manually remove students from timestamp-based groups",
-      });
-    }
+      if (userCheck.rows.length === 0) {
+        return res.status(400).json({ message: "Student not found" });
+      }
 
-    // College automatic group from groups table
-    await pool.query(
-      `UPDATE users SET headline = NULL WHERE user_id = $1 AND role = 'student' AND status = 'active'`,
-      [userId],
-    );
-    return res
-      .status(200)
-      .json({ message: "Student removed from college group" });
+      // Only clear college if it matches the group name
+      const userCollege = userCheck.rows[0]["college"];
+      if (userCollege) {
+        // Normalize both for comparison
+        const normalizeForComparison = (str) => str.toUpperCase().trim().replace(/[,.\-_() ]+/g, ' ').trim();
+        if (normalizeForComparison(userCollege) === normalizeForComparison(group_name)) {
+          await pool.query(
+            `UPDATE users SET "college" = NULL WHERE user_id = $1`,
+            [userId]
+          );
+          return res.status(200).json({ message: "Student removed from college group" });
+        } else {
+          return res.status(400).json({ message: "Student's college does not match this group" });
+        }
+      } else {
+        return res.status(400).json({ message: "Student is not in this college group" });
+      }
+    }
   } catch (error) {
     console.error("removeUserFromGroup error:", error);
     res.status(500).json({ message: "Server error" });
@@ -377,174 +432,120 @@ export const removeUserFromGroup = async (req, res) => {
 };
 
 export const updateGroup = async (req, res) => {
-  const { groupId } = req.params;
+  const { id } = req.params;
   const { group_name, start_date, end_date } = req.body;
+
+  console.log('updateGroup called with id:', id, 'data:', { group_name, start_date, end_date });
 
   if (!group_name) {
     return res.status(400).json({ message: "Group name is required" });
   }
 
-  const normalizedName = group_name.toUpperCase();
+  const normalizedName = group_name.toUpperCase().trim();
 
   try {
-    // First, check if this is a regular group row
     const groupCheck = await pool.query(
       `SELECT created_by, start_date, end_date FROM groups WHERE group_id = $1`,
-      [groupId],
+      [id]
     );
 
-    if (groupCheck.rows.length > 0) {
-      // --- Regular groups (manual / timestamp / college-manual) ---
-      // Check if another group with same name exists
-      const existingNameCheck = await pool.query(
-        `SELECT group_id FROM groups WHERE UPPER(group_name) = $1 AND group_id != $2`,
-        [normalizedName, groupId],
-      );
-
-      if (existingNameCheck.rows.length > 0) {
-        return res
-          .status(409)
-          .json({ message: "A group with the same name already exists" });
-      }
-
-      const existing = groupCheck.rows[0];
-
-      let newStartDate = start_date || null;
-      let newEndDate = end_date || null;
-      let newCreatedBy = existing.created_by;
-
-      // If this is an existing timestamp group (no created_by and both dates),
-      // allow switching between timestamp / non-timestamp via dates.
-      const isExistingTimestamp =
-        !existing.created_by && existing.start_date && existing.end_date;
-
-      if (isExistingTimestamp) {
-        // If both dates are sent, keep as timestamp (created_by null)
-        // If not, treat as non-timestamp (keep created_by as is, which is null)
-        if (start_date && end_date) {
-          newCreatedBy = null;
-        }
-      } else if (
-        existing.created_by &&
-        !existing.start_date &&
-        !existing.end_date
-      ) {
-        // Pure manual/random group (manual student selection):
-        // ignore any incoming dates to avoid accidentally converting it
-        newStartDate = null;
-        newEndDate = null;
-        newCreatedBy = existing.created_by;
-      }
-
-      const result = await pool.query(
-        `UPDATE groups
-         SET group_name = $1,
-             start_date = $2,
-             end_date = $3,
-             created_by = $4
-         WHERE group_id = $5
-         RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
-        [normalizedName, newStartDate, newEndDate, newCreatedBy, groupId],
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      return res.status(200).json(result.rows[0]);
-    }
-
-    // --- College-based groups from the college_groups VIEW ---
-    try {
-      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-      const collegeResult = await pool.query(
-        `SELECT group_id, group_name, start_date, end_date, created_at
-         FROM college_groups WHERE group_id = $1`,
-        [groupId],
-      );
-
-      if (collegeResult.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      // College groups are auto-derived from users. For now we:
-      // - Ignore any incoming dates (must remain "ongoing", end_date = NULL)
-      // - Ignore renaming, since group_id is derived from the college_name.
-      // Just return the current definition so the edit UI doesn't break.
-      const group = collegeResult.rows[0];
-      group.created_by = null;
-      return res.status(200).json(group);
-    } catch (e) {
-      console.error("updateGroup college_groups error:", e);
+    if (groupCheck.rows.length === 0) {
       return res.status(404).json({ message: "Group not found" });
     }
+
+    // Check if another group with same name exists
+    const existingNameCheck = await pool.query(
+      `SELECT group_id FROM groups WHERE 
+        REGEXP_REPLACE(UPPER(TRIM(group_name)), '[,.\\-_() ]+', ' ', 'g') = 
+        REGEXP_REPLACE($1, '[,.\\-_() ]+', ' ', 'g')
+        AND group_id != $2`,
+      [normalizedName, id]
+    );
+
+    if (existingNameCheck.rows.length > 0) {
+      return res.status(409).json({ message: "A group with the same name already exists" });
+    }
+
+    const existing = groupCheck.rows[0];
+
+    let newStartDate = start_date || null;
+    let newEndDate = end_date || null;
+    let newCreatedBy = existing.created_by;
+
+    // If this is an existing timestamp group (no created_by and both dates),
+    // allow switching between timestamp / non-timestamp via dates.
+    const isExistingTimestamp =
+      !existing.created_by && existing.start_date && existing.end_date;
+
+    if (isExistingTimestamp) {
+      // If both dates are sent, keep as timestamp (created_by null)
+      // If not, treat as non-timestamp (keep created_by as is, which is null)
+      if (start_date && end_date) {
+        newCreatedBy = null;
+      }
+    } else if (
+      existing.created_by &&
+      !existing.start_date &&
+      !existing.end_date
+    ) {
+      // Pure manual group (manual student selection):
+      // ignore any incoming dates to avoid accidentally converting it
+      newStartDate = null;
+      newEndDate = null;
+      newCreatedBy = existing.created_by;
+    }
+
+    const result = await pool.query(
+      `UPDATE groups
+       SET group_name = $1,
+           start_date = $2,
+           end_date = $3,
+           created_by = $4
+       WHERE group_id = $5
+       RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
+      [normalizedName, newStartDate, newEndDate, newCreatedBy, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    console.log('Group updated successfully:', result.rows[0].group_id);
+    return res.status(200).json(result.rows[0]);
   } catch (error) {
     console.error("updateGroup error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 export const deleteGroup = async (req, res) => {
-  const { groupId } = req.params;
+  const { id } = req.params;
 
   try {
-    // First check if this is a regular group row
     const groupCheck = await pool.query(
       `SELECT group_id FROM groups WHERE group_id = $1`,
-      [groupId],
+      [id]
     );
 
-    if (groupCheck.rows.length > 0) {
-      // Regular group: remove memberships then delete group
-      await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [
-        groupId,
-      ]);
-
-      const result = await pool.query(
-        `DELETE FROM groups WHERE group_id = $1 RETURNING group_id`,
-        [groupId],
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      return res.status(200).json({ message: "Group deleted successfully" });
-    }
-
-    // If not in groups, it might be a college_groups (view) id.
-    try {
-      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-      const collegeCheck = await pool.query(
-        `SELECT group_name FROM college_groups WHERE group_id = $1`,
-        [groupId],
-      );
-
-      if (collegeCheck.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      const collegeName = collegeCheck.rows[0].group_name;
-
-      // "Deleting" a college-based group means clearing the college_name
-      // from all its students so the view no longer produces that group.
-      await pool.query(
-        `UPDATE users
-         SET headline = NULL
-         WHERE headline = $1
-           AND role = 'student' AND status = 'active'`,
-        [collegeName],
-      );
-
-      return res
-        .status(200)
-        .json({ message: "College-based group deleted successfully" });
-    } catch (e) {
-      console.error("deleteGroup college_groups error:", e);
+    if (groupCheck.rows.length === 0) {
       return res.status(404).json({ message: "Group not found" });
     }
+
+    // Remove memberships then delete group
+    await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [id]);
+
+    const result = await pool.query(
+      `DELETE FROM groups WHERE group_id = $1 RETURNING group_id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    return res.status(200).json({ message: "Group deleted successfully" });
   } catch (error) {
     console.error("deleteGroup error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
