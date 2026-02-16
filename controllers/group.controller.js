@@ -144,11 +144,12 @@ export const getGroups = async (req, res) => {
 };
 
 export const getGroup = async (req, res) => {
-  const { id } = req.params;
+  const { groupId, id } = req.params;
+  const resolvedId = groupId || id;
 
-  console.log('getGroup called with id:', id);
+  console.log('getGroup called with id:', resolvedId);
 
-  if (!id) {
+  if (!resolvedId) {
     return res.status(400).json({ message: "Group ID is required" });
   }
 
@@ -156,7 +157,7 @@ export const getGroup = async (req, res) => {
     const groupResult = await pool.query(
       `SELECT group_id, group_name, start_date, end_date, created_by, created_at
        FROM groups WHERE group_id = $1`,
-      [id]
+      [resolvedId]
     );
 
     if (groupResult.rows.length === 0) {
@@ -176,7 +177,7 @@ export const getGroup = async (req, res) => {
          WHERE gu.group_id = $1
            AND u.status = 'active'
            AND u.role = 'student'`,
-        [id]
+        [resolvedId]
       );
       group.user_count = userCountResult.rows[0].user_count;
     } else if (group.start_date && group.end_date) {
@@ -217,12 +218,13 @@ export const getGroup = async (req, res) => {
 };
 
 export const getGroupUsers = async (req, res) => {
-  const { id } = req.params;
+  const { groupId, id } = req.params;
+  const resolvedId = groupId || id;
 
   try {
     const groupCheck = await pool.query(
       `SELECT group_name, start_date, end_date, created_by FROM groups WHERE group_id = $1`,
-      [id]
+      [resolvedId]
     );
 
     if (groupCheck.rows.length === 0) {
@@ -247,7 +249,7 @@ export const getGroupUsers = async (req, res) => {
            AND u.status = 'active'
            AND u.role = 'student'
          ORDER BY gu.assigned_at`,
-        [id]
+        [resolvedId]
       );
       return res.status(200).json(result.rows);
     } else if (start_date && end_date) {
@@ -293,13 +295,14 @@ export const getGroupUsers = async (req, res) => {
 };
 
 export const addUserToGroup = async (req, res) => {
-  const { id, userId } = req.params;
+  const { groupId, id, userId } = req.params;
+  const resolvedId = groupId || id;
   const { start_date, end_date } = req.body || {};
 
   try {
     const groupCheck = await pool.query(
       `SELECT group_name, created_by, start_date, end_date FROM groups WHERE group_id = $1`,
-      [id]
+      [resolvedId]
     );
 
     if (groupCheck.rows.length === 0) {
@@ -327,7 +330,7 @@ export const addUserToGroup = async (req, res) => {
          VALUES ($1, $2, NOW(), $3, $4)
          ON CONFLICT (group_id, user_id)
          DO UPDATE SET start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
-        [id, userId, start_date || null, end_date || null]
+        [resolvedId, userId, start_date || null, end_date || null]
       );
       return res.status(200).json({ message: "Student added to manual group" });
     } else if (groupStartDate && groupEndDate) {
@@ -342,7 +345,7 @@ export const addUserToGroup = async (req, res) => {
         `INSERT INTO group_users (group_id, user_id, assigned_at)
          VALUES ($1, $2, NOW())
          ON CONFLICT (group_id, user_id) DO NOTHING`,
-        [id, userId]
+        [resolvedId, userId]
       );
       return res.status(200).json({ message: "Student added to timestamp group (date validated)" });
     } else {
@@ -368,12 +371,13 @@ export const addUserToGroup = async (req, res) => {
 };
 
 export const removeUserFromGroup = async (req, res) => {
-  const { id, userId } = req.params;
+  const { groupId, id, userId } = req.params;
+  const resolvedId = groupId || id;
 
   try {
     const groupCheck = await pool.query(
       `SELECT created_by, start_date, end_date, group_name FROM groups WHERE group_id = $1`,
-      [id]
+      [resolvedId]
     );
 
     if (groupCheck.rows.length === 0) {
@@ -386,14 +390,14 @@ export const removeUserFromGroup = async (req, res) => {
       // MANUAL GROUP: Remove from group_users table
       await pool.query(
         `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
-        [id, userId]
+        [resolvedId, userId]
       );
       return res.status(200).json({ message: "Student removed from manual group" });
     } else if (start_date && end_date) {
       // TIMESTAMP GROUP: Remove from group_users table
       await pool.query(
         `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
-        [id, userId]
+        [resolvedId, userId]
       );
       return res.status(200).json({ message: "Student removed from timestamp group" });
     } else {
@@ -432,10 +436,11 @@ export const removeUserFromGroup = async (req, res) => {
 };
 
 export const updateGroup = async (req, res) => {
-  const { id } = req.params;
+  const { groupId, id } = req.params;
+  const resolvedId = groupId || id;
   const { group_name, start_date, end_date } = req.body;
 
-  console.log('updateGroup called with id:', id, 'data:', { group_name, start_date, end_date });
+  console.log('updateGroup called with id:', resolvedId, 'data:', { group_name, start_date, end_date });
 
   if (!group_name) {
     return res.status(400).json({ message: "Group name is required" });
@@ -446,7 +451,7 @@ export const updateGroup = async (req, res) => {
   try {
     const groupCheck = await pool.query(
       `SELECT created_by, start_date, end_date FROM groups WHERE group_id = $1`,
-      [id]
+      [resolvedId]
     );
 
     if (groupCheck.rows.length === 0) {
@@ -459,7 +464,7 @@ export const updateGroup = async (req, res) => {
         REGEXP_REPLACE(UPPER(TRIM(group_name)), '[,.\\-_() ]+', ' ', 'g') = 
         REGEXP_REPLACE($1, '[,.\\-_() ]+', ' ', 'g')
         AND group_id != $2`,
-      [normalizedName, id]
+      [normalizedName, resolvedId]
     );
 
     if (existingNameCheck.rows.length > 0) {
@@ -503,7 +508,7 @@ export const updateGroup = async (req, res) => {
            created_by = $4
        WHERE group_id = $5
        RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
-      [normalizedName, newStartDate, newEndDate, newCreatedBy, id]
+      [normalizedName, newStartDate, newEndDate, newCreatedBy, resolvedId]
     );
 
     if (result.rows.length === 0) {
@@ -519,12 +524,13 @@ export const updateGroup = async (req, res) => {
 };
 
 export const deleteGroup = async (req, res) => {
-  const { id } = req.params;
+  const { groupId, id } = req.params;
+  const resolvedId = groupId || id;
 
   try {
     const groupCheck = await pool.query(
       `SELECT group_id FROM groups WHERE group_id = $1`,
-      [id]
+      [resolvedId]
     );
 
     if (groupCheck.rows.length === 0) {
@@ -532,11 +538,11 @@ export const deleteGroup = async (req, res) => {
     }
 
     // Remove memberships then delete group
-    await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [id]);
+    await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [resolvedId]);
 
     const result = await pool.query(
       `DELETE FROM groups WHERE group_id = $1 RETURNING group_id`,
-      [id]
+      [resolvedId]
     );
 
     if (result.rows.length === 0) {
