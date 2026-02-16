@@ -205,6 +205,7 @@ export const getMyCourses = async (req, res) => {
     LEFT JOIN instructor_reviews ir
       ON ir.course_id = c.courses_id AND ir.student_id = sc.student_id
     WHERE sc.student_id = $1
+      AND c.status = 'approved'
     `,
     [studentId],
   );
