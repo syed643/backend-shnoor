@@ -150,6 +150,7 @@ export const searchCourses = async (req, res) => {
         -- Search Courses
         SELECT 
           c.courses_id AS id,
+          c.courses_id AS course_id,
           c.title,
           c.description,
           c.category,
@@ -176,6 +177,7 @@ export const searchCourses = async (req, res) => {
         -- Search Modules in approved courses
         SELECT 
           m.module_id AS id,
+          c.courses_id AS course_id,
           m.title,
           c.description,
           c.category,
