@@ -6,6 +6,9 @@ import {
   updateUserStatus,
   updateMyProfile,
   uploadProfilePicture,
+  addStudent,
+  bulkUploadInstructors,
+  bulkUploadStudents,
 } from "../controllers/user.controller.js";
 import multer from "multer";
 import path from "path";
@@ -53,6 +56,32 @@ router.post(
   attachUser,
   roleGuard("admin"),
   addInstructor
+);
+
+router.post(
+  "/students",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  addStudent
+);
+
+router.post(
+  "/instructors/bulk",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  upload.single("csv"),
+  bulkUploadInstructors
+);
+
+router.post(
+  "/students/bulk",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  upload.single("csv"),
+  bulkUploadStudents
 );
 
 router.patch(

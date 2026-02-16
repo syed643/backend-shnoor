@@ -11,7 +11,12 @@ import {
   getCourseById,
   exploreCourses,
   bulkUploadCourses,
-  searchInstructorCoursesAndModules
+  searchInstructorCoursesAndModules,
+  unarchiveCourse,
+  archiveCourse,
+  rejectCourse,
+  publishCourse,
+  submitForReview
 } from "../controllers/course.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -117,4 +122,47 @@ router.get(
   searchInstructorCoursesAndModules
 );
 
+router.patch(
+  "/:courseId/submit-review",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  submitForReview
+);
+
+// Admin: Publish course (review → published)
+router.patch(
+  "/:courseId/publish",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  publishCourse
+);
+
+// Admin: Reject course (review → draft)
+router.patch(
+  "/:courseId/reject",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  rejectCourse
+);
+
+// Admin/Instructor: Archive course (published → archived)
+router.patch(
+  "/:courseId/archive",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin", "instructor"),
+  archiveCourse
+);
+
+// Admin/Instructor: Unarchive course (archived → published)
+router.patch(
+  "/:courseId/unarchive",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin", "instructor"),
+  unarchiveCourse
+);
 export default router;

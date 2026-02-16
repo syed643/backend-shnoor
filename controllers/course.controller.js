@@ -663,3 +663,244 @@ export const searchInstructorCoursesAndModules = async (req, res) => {
     });
   }
 };
+
+export const submitForReview = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const instructorId = req.user.id;
+
+    // Verify ownership and current status
+    const courseCheck = await pool.query(
+      `SELECT courses_id, status, title FROM courses 
+       WHERE courses_id = $1 AND instructor_id = $2`,
+      [courseId, instructorId]
+    );
+
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ 
+        message: "Course not found or you don't have permission" 
+      });
+    }
+
+    const course = courseCheck.rows[0];
+
+    // Validate state transition
+    if (course.status !== 'draft') {
+      return res.status(400).json({ 
+        message: `Cannot submit course in '${course.status}' status. Only draft courses can be submitted.` 
+      });
+    }
+
+    // Check if course has at least one module
+    const moduleCheck = await pool.query(
+      `SELECT COUNT(*) as module_count FROM modules WHERE course_id = $1`,
+      [courseId]
+    );
+
+    if (Number(moduleCheck.rows[0].module_count) === 0) {
+      return res.status(400).json({ 
+        message: "Course must have at least one module before submission" 
+      });
+    }
+
+    // Update status to 'review'
+    const result = await pool.query(
+      `UPDATE courses 
+       SET status = 'review', submitted_at = NOW()
+       WHERE courses_id = $1
+       RETURNING *`,
+      [courseId]
+    );
+
+    res.status(200).json({
+      message: "Course submitted for review successfully",
+      course: result.rows[0],
+    });
+  } catch (error) {
+    console.error("submitForReview error:", error);
+    res.status(500).json({ message: "Failed to submit course for review" });
+  }
+};
+
+export const publishCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+
+    // Verify course exists and is in review status
+    const courseCheck = await pool.query(
+      `SELECT courses_id, status, title FROM courses WHERE courses_id = $1`,
+      [courseId]
+    );
+
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const course = courseCheck.rows[0];
+
+    if (course.status !== 'review') {
+      return res.status(400).json({ 
+        message: `Cannot publish course in '${course.status}' status. Only courses under review can be published.` 
+      });
+    }
+
+    // Update status to 'published'
+    const result = await pool.query(
+      `UPDATE courses 
+       SET status = 'published', published_at = NOW()
+       WHERE courses_id = $1
+       RETURNING *`,
+      [courseId]
+    );
+
+    res.status(200).json({
+      message: "Course published successfully",
+      course: result.rows[0],
+    });
+  } catch (error) {
+    console.error("publishCourse error:", error);
+    res.status(500).json({ message: "Failed to publish course" });
+  }
+};
+
+export const rejectCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const { reason } = req.body; // Optional rejection reason
+
+    // Verify course exists and is in review status
+    const courseCheck = await pool.query(
+      `SELECT courses_id, status, title FROM courses WHERE courses_id = $1`,
+      [courseId]
+    );
+
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const course = courseCheck.rows[0];
+
+    if (course.status !== 'review') {
+      return res.status(400).json({ 
+        message: `Cannot reject course in '${course.status}' status. Only courses under review can be rejected.` 
+      });
+    }
+
+    // Update status back to 'draft'
+    const result = await pool.query(
+      `UPDATE courses 
+       SET status = 'draft', submitted_at = NULL
+       WHERE courses_id = $1
+       RETURNING *`,
+      [courseId]
+    );
+
+    res.status(200).json({
+      message: reason ? `Course rejected: ${reason}` : "Course rejected and returned to draft",
+      course: result.rows[0],
+    });
+  } catch (error) {
+    console.error("rejectCourse error:", error);
+    res.status(500).json({ message: "Failed to reject course" });
+  }
+};
+
+export const archiveCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Verify course exists and ownership
+    const courseCheck = await pool.query(
+      `SELECT courses_id, status, instructor_id, title FROM courses WHERE courses_id = $1`,
+      [courseId]
+    );
+
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const course = courseCheck.rows[0];
+
+    // Check permission (admin or course owner)
+    if (userRole !== 'admin' && course.instructor_id !== userId) {
+      return res.status(403).json({ 
+        message: "You don't have permission to archive this course" 
+      });
+    }
+
+    if (course.status !== 'published') {
+      return res.status(400).json({ 
+        message: `Cannot archive course in '${course.status}' status. Only published courses can be archived.` 
+      });
+    }
+
+    // Update status to 'archived'
+    const result = await pool.query(
+      `UPDATE courses 
+       SET status = 'archived', archived_at = NOW()
+       WHERE courses_id = $1
+       RETURNING *`,
+      [courseId]
+    );
+
+    res.status(200).json({
+      message: "Course archived successfully. It is now completely hidden from all users including enrolled students.",
+      course: result.rows[0],
+    });
+  } catch (error) {
+    console.error("archiveCourse error:", error);
+    res.status(500).json({ message: "Failed to archive course" });
+  }
+};
+
+export const unarchiveCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Verify course exists and ownership
+    const courseCheck = await pool.query(
+      `SELECT courses_id, status, instructor_id, title FROM courses WHERE courses_id = $1`,
+      [courseId]
+    );
+
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const course = courseCheck.rows[0];
+
+    // Check permission (admin or course owner)
+    if (userRole !== 'admin' && course.instructor_id !== userId) {
+      return res.status(403).json({ 
+        message: "You don't have permission to unarchive this course" 
+      });
+    }
+
+    if (course.status !== 'archived') {
+      return res.status(400).json({ 
+        message: `Cannot unarchive course in '${course.status}' status. Only archived courses can be unarchived.` 
+      });
+    }
+
+    // Update status back to 'published'
+    const result = await pool.query(
+      `UPDATE courses 
+       SET status = 'published', published_at = NOW()
+       WHERE courses_id = $1
+       RETURNING *`,
+      [courseId]
+    );
+
+    res.status(200).json({
+      message: "Course unarchived successfully. It's now live in the marketplace.",
+      course: result.rows[0],
+    });
+  } catch (error) {
+    console.error("unarchiveCourse error:", error);
+    res.status(500).json({ message: "Failed to unarchive course" });
+  }
+};

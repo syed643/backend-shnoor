@@ -1,7 +1,7 @@
 import pool from "../db/postgres.js";
 import { emitNotificationToUser } from "../services/socket.js";
 
-export const getDashboardStats = async (req, res) => {
+{/*export const getDashboardStats = async (req, res) => {
   try {
     const studentsResult = await pool.query(
       "SELECT COUNT(*) FROM users WHERE role = 'student'",
@@ -16,6 +16,113 @@ export const getDashboardStats = async (req, res) => {
       totalStudents: Number(studentsResult.rows[0].count),
       totalInstructors: Number(instructorsResult.rows[0].count),
       pendingCourses: Number(pendingCoursesResult.rows[0].count),
+    });
+  } catch (error) {
+    console.error("Admin dashboard stats error:", error);
+    res.status(500).json({ message: "Failed to load dashboard stats" });
+  }
+};*/}
+
+export const getDashboardStats = async (req, res) => {
+  try {
+    let { startDate, endDate } = req.query;
+    
+    // If no date filters provided, return all-time totals
+    if (!startDate || !endDate) {
+      const studentsResult = await pool.query(
+        `SELECT COUNT(*) FROM users WHERE role IN ('student', 'user', 'learner')`
+      );
+      const instructorsResult = await pool.query(
+        `SELECT COUNT(*) FROM users WHERE role IN ('instructor', 'company')`
+      );
+      const pendingCoursesResult = await pool.query(
+        `SELECT COUNT(*) FROM courses WHERE status = 'review'`
+      );
+      
+      // Count certificates - Always 0 for now as certificates aren't issued yet
+      const certificates = 0;
+
+      return res.status(200).json({
+        totalStudents: Number(studentsResult.rows[0].count),
+        totalInstructors: Number(instructorsResult.rows[0].count),
+        pendingCourses: Number(pendingCoursesResult.rows[0].count),
+        certificates,
+        studentsChange: 0,
+        instructorsChange: 0,
+        pendingCoursesChange: 0,
+        startDate: null,
+        endDate: null
+      });
+    }
+
+    // Calculate previous period (same duration) for change percentages
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const durationMs = end - start;
+    const prevEnd = new Date(start.getTime() - 86400000); // 1 day before start
+    const prevStart = new Date(prevEnd.getTime() - durationMs);
+    const prevStartDate = prevStart.toISOString().slice(0, 10);
+    const prevEndDate = prevEnd.toISOString().slice(0, 10);
+
+    // Current period - Students created in this period
+    const studentsResult = await pool.query(
+      `SELECT COUNT(*) FROM users WHERE role IN ('student', 'user', 'learner') AND created_at::date BETWEEN $1 AND $2`,
+      [startDate, endDate]
+    );
+    // Previous period - Students created in previous period
+    const prevStudentsResult = await pool.query(
+      `SELECT COUNT(*) FROM users WHERE role IN ('student', 'user', 'learner') AND created_at::date BETWEEN $1 AND $2`,
+      [prevStartDate, prevEndDate]
+    );
+
+    // Current period - Instructors created in this period
+    const instructorsResult = await pool.query(
+      `SELECT COUNT(*) FROM users WHERE role IN ('instructor', 'company') AND created_at::date BETWEEN $1 AND $2`,
+      [startDate, endDate]
+    );
+    // Previous period - Instructors created in previous period
+    const prevInstructorsResult = await pool.query(
+      `SELECT COUNT(*) FROM users WHERE role IN ('instructor', 'company') AND created_at::date BETWEEN $1 AND $2`,
+      [prevStartDate, prevEndDate]
+    );
+
+    // Current period - Pending courses
+    const pendingCoursesResult = await pool.query(
+      `SELECT COUNT(*) FROM courses WHERE status = 'review' AND created_at::date BETWEEN $1 AND $2`,
+      [startDate, endDate]
+    );
+    // Previous period - Pending courses
+    const prevPendingCoursesResult = await pool.query(
+      `SELECT COUNT(*) FROM courses WHERE status = 'review' AND created_at::date BETWEEN $1 AND $2`,
+      [prevStartDate, prevEndDate]
+    );
+
+    // Calculate percentage changes
+    const calculateChange = (current, previous) => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return Math.round(((current - previous) / previous) * 100);
+    };
+
+    const totalStudents = Number(studentsResult.rows[0].count);
+    const prevStudents = Number(prevStudentsResult.rows[0].count);
+    const totalInstructors = Number(instructorsResult.rows[0].count);
+    const prevInstructors = Number(prevInstructorsResult.rows[0].count);
+    const pendingCourses = Number(pendingCoursesResult.rows[0].count);
+    const prevPendingCourses = Number(prevPendingCoursesResult.rows[0].count);
+
+    // Certificates - Always 0 for now as certificates aren't issued yet
+    const certificates = 0;
+
+    res.status(200).json({
+      totalStudents,
+      totalInstructors,
+      pendingCourses,
+      certificates,
+      studentsChange: calculateChange(totalStudents, prevStudents),
+      instructorsChange: calculateChange(totalInstructors, prevInstructors),
+      pendingCoursesChange: calculateChange(pendingCourses, prevPendingCourses),
+      startDate,
+      endDate
     });
   } catch (error) {
     console.error("Admin dashboard stats error:", error);
@@ -39,46 +146,7 @@ ORDER BY created_at DESC;
   }
 };
 
-{
-  /*export const assignCourses = async (req, res) => {
-  const { studentIds, courseIds } = req.body;
 
-  if (!studentIds?.length || !courseIds?.length) {
-    return res.status(400).json({
-      message: "studentIds and courseIds are required",
-    });
-  }
-
-  try {
-    const values = [];
-    const placeholders = [];
-    let index = 1;
-
-    for (const studentId of studentIds) {
-      for (const courseId of courseIds) {
-        values.push(studentId, courseId);
-        placeholders.push(`($${index}, $${index + 1})`);
-        index += 2;
-      }
-    }
-
-    const query = `
-      INSERT INTO course_assignments (student_id, course_id)
-      VALUES ${placeholders.join(",")}
-      ON CONFLICT DO NOTHING
-    `;
-
-    await pool.query(query, values);
-
-    res.status(200).json({
-      message: "Courses assigned successfully",
-    });
-  } catch (error) {
-    console.error("Assign courses error:", error);
-    res.status(500).json({ message: "Failed to assign courses" });
-  }
-};*/
-}
 
 export const assignCourses = async (req, res) => {
   const { studentIds = [], groupIds = [], courseIds } = req.body;
