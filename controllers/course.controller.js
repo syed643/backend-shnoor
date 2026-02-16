@@ -747,7 +747,7 @@ export const publishCourse = async (req, res) => {
     // Update status to 'approved'
     const result = await pool.query(
       `UPDATE courses 
-       SET status = 'approved', approved_at = NOW()
+       SET status = 'approved'
        WHERE courses_id = $1
        RETURNING *`,
       [courseId]
@@ -839,7 +839,7 @@ export const archiveCourse = async (req, res) => {
     // Update status to 'archived'
     const result = await pool.query(
       `UPDATE courses 
-       SET status = 'archived', archived_at = NOW()
+       SET status = 'archived'
        WHERE courses_id = $1
        RETURNING *`,
       [courseId]
@@ -889,7 +889,7 @@ export const unarchiveCourse = async (req, res) => {
     // Update status back to 'published'
     const result = await pool.query(
       `UPDATE courses 
-       SET status = 'approved', approved_at = NOW()
+       SET status = 'approved'
        WHERE courses_id = $1
        RETURNING *`,
       [courseId]
