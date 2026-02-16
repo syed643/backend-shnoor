@@ -685,7 +685,7 @@ export const submitForReview = async (req, res) => {
     const course = courseCheck.rows[0];
 
     // Validate state transition
-    if (course.status !== 'draft') {
+    if (course.status !== 'pending') {
       return res.status(400).json({ 
         message: `Cannot submit course in '${course.status}' status. Only draft courses can be submitted.` 
       });
@@ -789,7 +789,7 @@ export const rejectCourse = async (req, res) => {
     // Update status back to 'draft'
     const result = await pool.query(
       `UPDATE courses 
-       SET status = 'draft', submitted_at = NULL
+       SET status = 'pending', submitted_at = NULL
        WHERE courses_id = $1
        RETURNING *`,
       [courseId]
