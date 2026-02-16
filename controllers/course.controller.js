@@ -3,26 +3,23 @@ import csv from "csv-parser";
 import { Readable } from "stream";
 
 export const addCourse = async (req, res) => {
-  const values = [
-    instructor_id,
+  const instructor_id = req.user.id;
+  const {
     title,
     description,
     category,
-    thumbnail_url || null,
-    difficulty || null,
-    status || "draft",
-    validity_value || null,
-    validity_unit || null,
-    expiresAt,
-    schedule_start_at || null,
-    price_type || "free",
-    price_type === "paid" ? price_amount : null,
-    prereq_description || null,
-    prereq_video_urls || [], // ✅ FIXED
-    prereq_pdf_url || null,
-  ];
-
-  const instructor_id = req.user.id;
+    thumbnail_url,
+    difficulty,
+    status,
+    validity_value,
+    validity_unit,
+    schedule_start_at,
+    price_type,
+    price_amount,
+    prereq_description,
+    prereq_video_urls,
+    prereq_pdf_url,
+  } = req.body || {};
 
   try {
     // ✅ CALCULATE expires_at IN JS (no Postgres interval issues)
