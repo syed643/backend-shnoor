@@ -588,3 +588,81 @@ export const bulkUploadCourses = async (req, res) => {
     });
   }
 };
+
+export const searchInstructorCoursesAndModules = async (req, res) => {
+  try {
+    const { query } = req.query;
+    const instructorId = req.user.id;
+
+    if (!query || !query.trim()) {
+      return res.json([]);
+    }
+
+    const searchTerm = `%${query.trim()}%`;
+
+    // Search instructor's courses and modules
+    const result = await pool.query(
+      `SELECT * FROM (
+        -- Search Instructor's Courses
+        SELECT 
+          c.courses_id AS id,
+          c.title,
+          c.description,
+          c.category,
+          c.status,
+          c.difficulty,
+          c.thumbnail_url,
+          c.validity_value,
+          c.validity_unit,
+          c.expires_at,
+          c.created_at,
+          c.instructor_id,
+          $2::TEXT AS instructor_name,
+          'course' AS type,
+          NULL AS course_title
+        FROM courses c
+        WHERE c.instructor_id = $3
+          AND (LOWER(c.title) LIKE LOWER($1)
+            OR LOWER(COALESCE(c.description, '')) LIKE LOWER($1)
+            OR LOWER(COALESCE(c.category, '')) LIKE LOWER($1))
+        
+        UNION ALL
+        
+        -- Search Instructor's Modules
+        SELECT 
+          m.module_id AS id,
+          m.title,
+          c.description,
+          c.category,
+          c.status,
+          c.difficulty,
+          c.thumbnail_url,
+          c.validity_value,
+          c.validity_unit,
+          c.expires_at,
+          m.created_at,
+          c.instructor_id,
+          $2::TEXT AS instructor_name,
+          'module' AS type,
+          c.title AS course_title
+        FROM modules m
+        JOIN courses c ON m.course_id = c.courses_id
+        WHERE c.instructor_id = $3
+          AND (LOWER(m.title) LIKE LOWER($1)
+            OR LOWER(COALESCE(m.notes, '')) LIKE LOWER($1))
+      ) AS combined_results
+      ORDER BY created_at DESC
+      LIMIT 20`,
+      [searchTerm, req.user.full_name || 'Instructor', instructorId]
+    );
+
+    res.json(result.rows);
+    
+  } catch (error) {
+    console.error('Instructor search error:', error);
+    res.status(500).json({ 
+      error: 'Failed to search courses and modules',
+      message: error.message
+    });
+  }
+};

@@ -10,7 +10,8 @@ import {
   getInstructorCourseStats,
   getCourseById,
   exploreCourses,
-  bulkUploadCourses
+  bulkUploadCourses,
+  searchInstructorCoursesAndModules
 } from "../controllers/course.controller.js";
 
 import firebaseAuth from "../middlewares/firebaseAuth.js";
@@ -106,6 +107,14 @@ router.post(
   roleGuard("instructor"),
   uploadCsv.single("file"),
   bulkUploadCourses
+);
+
+router.get(
+  "/instructor/search",
+  firebaseAuth,
+  attachUser,
+  roleGuard("instructor"),
+  searchInstructorCoursesAndModules
 );
 
 export default router;

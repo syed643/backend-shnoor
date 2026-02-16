@@ -4,9 +4,17 @@ import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
 import { getStudentCourseById, enrollStudent, checkEnrollmentStatus, getMyCourses,getRecommendedCourses } from "../controllers/studentCourses.controller.js";
 import { markModuleCompleted } from "../controllers/studentProgress.controller.js";
-import { getStudentDashboard } from "../controllers/student.controller.js";
+import { getStudentDashboard, searchCourses } from "../controllers/student.controller.js";
 
 const router = express.Router();
+
+router.get(
+  "/search-courses",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "user"),
+  searchCourses
+);
 
 router.get(
   "/courses/:courseId",

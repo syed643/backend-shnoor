@@ -136,29 +136,108 @@ router.post(
   bulkAssignStudentsToGroup
 );
 
+router.get(
+  "/search-courses",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  async (req, res) => {
+    try {
+      console.log('📥 Search request received');
+      console.log('Query:', req.query);
+      
+      const { query } = req.query;
+
+      // Validate query parameter
+      if (!query || query.trim().length === 0) {
+        console.log('❌ Empty search query');
+        return res.status(400).json({ 
+          message: 'Search query is required',
+          results: [] 
+        });
+      }
+
+      const searchTerm = `%${query.trim()}%`;
+      console.log('🔍 Searching for:', searchTerm);
+
+      // SQL query to search courses and modules with instructor information
+      const searchQuery = `
+        SELECT * FROM (
+          -- Search Courses
+          SELECT 
+            c.courses_id AS id,
+            c.title,
+            c.description,
+            c.category,
+            c.status,
+            c.difficulty,
+            c.thumbnail_url,
+            c.validity_value,
+            c.validity_unit,
+            c.expires_at,
+            c.created_at,
+            c.instructor_id,
+            u.full_name AS instructor_name,
+            'course' AS type,
+            NULL AS course_title
+          FROM courses c
+          LEFT JOIN users u ON c.instructor_id = u.user_id
+          WHERE 
+            LOWER(c.title) LIKE LOWER($1)
+            OR LOWER(COALESCE(c.description, '')) LIKE LOWER($1)
+            OR LOWER(COALESCE(c.category, '')) LIKE LOWER($1)
+          
+          UNION ALL
+          
+          -- Search Modules
+          SELECT 
+            m.module_id AS id,
+            m.title,
+            c.description,
+            c.category,
+            c.status,
+            c.difficulty,
+            c.thumbnail_url,
+            c.validity_value,
+            c.validity_unit,
+            c.expires_at,
+            m.created_at,
+            c.instructor_id,
+            u.full_name AS instructor_name,
+            'module' AS type,
+            c.title AS course_title
+          FROM modules m
+          JOIN courses c ON m.course_id = c.courses_id
+          LEFT JOIN users u ON c.instructor_id = u.user_id
+          WHERE 
+            LOWER(m.title) LIKE LOWER($1)
+            OR LOWER(COALESCE(m.notes, '')) LIKE LOWER($1)
+        ) AS combined_results
+        ORDER BY created_at DESC
+        LIMIT 20
+      `;
+
+      // Execute query
+      const result = await pool.query(searchQuery, [searchTerm]);
+      
+      console.log(`✅ Found ${result.rows.length} results (courses + modules)`);
+      
+      // Return results
+      res.json(result.rows);
+
+    } catch (error) {
+      console.error('❌ Search error:', error.message);
+      console.error('Full error:', error);
+      
+      res.status(500).json({ 
+        message: 'Failed to search courses and modules',
+        error: error.message,
+        results: []
+      });
+    }
+  }
+);
+
 export default router;
 
 
-{/*router.get(
-  "/courses/pending",
-  firebaseAuth,
-  attachUser,
-  roleGuard("admin"),
-  getPendingCourses
-);
-*/}
-{/*router.get(
-  "/courses/approved",
-  firebaseAuth,
-  attachUser,
-  roleGuard("admin"),
-  getApprovedCourses
-);*/}
-
-{/*router.post(
-  "/courses/:courseId/status",
-  firebaseAuth,
-  attachUser,
-  roleGuard("admin"),
-  updateCourseStatus
-);*/}
