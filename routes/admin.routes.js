@@ -18,6 +18,7 @@ import { getAllUsers } from "../controllers/user.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
 import roleGuard from "../middlewares/roleGuard.js";
+import pool from "../db/postgres.js";
 
 const router = express.Router();
 
