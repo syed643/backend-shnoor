@@ -740,26 +740,26 @@ export const publishCourse = async (req, res) => {
 
     if (course.status !== 'review') {
       return res.status(400).json({ 
-        message: `Cannot publish course in '${course.status}' status. Only courses under review can be published.` 
+        message: `Cannot approve course in '${course.status}' status. Only courses under review can be approved.` 
       });
     }
 
-    // Update status to 'published'
+    // Update status to 'approved'
     const result = await pool.query(
       `UPDATE courses 
-       SET status = 'published', published_at = NOW()
+       SET status = 'approved', approved_at = NOW()
        WHERE courses_id = $1
        RETURNING *`,
       [courseId]
     );
 
     res.status(200).json({
-      message: "Course published successfully",
+      message: "Course approved successfully",
       course: result.rows[0],
     });
   } catch (error) {
     console.error("publishCourse error:", error);
-    res.status(500).json({ message: "Failed to publish course" });
+    res.status(500).json({ message: "Failed to approve course" });
   }
 };
 
@@ -830,9 +830,9 @@ export const archiveCourse = async (req, res) => {
       });
     }
 
-    if (course.status !== 'published') {
+    if (course.status !== 'approved') {
       return res.status(400).json({ 
-        message: `Cannot archive course in '${course.status}' status. Only published courses can be archived.` 
+        message: `Cannot archive course in '${course.status}' status. Only approved courses can be archived.` 
       });
     }
 
@@ -889,7 +889,7 @@ export const unarchiveCourse = async (req, res) => {
     // Update status back to 'published'
     const result = await pool.query(
       `UPDATE courses 
-       SET status = 'published', published_at = NOW()
+       SET status = 'approved', approved_at = NOW()
        WHERE courses_id = $1
        RETURNING *`,
       [courseId]
