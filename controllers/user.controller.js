@@ -1,6 +1,6 @@
 import admin from "../services/firebaseAdmin.js";
 import pool from "../db/postgres.js";
-import { sendInstructorInvite } from "../services/email.service.js";
+import { sendInstructorInvite, sendStudentInvite } from "../services/email.service.js";
 import { validateBulkInstructors } from "../utils/csvValidator.js";
 import csvParser from "csv-parser";
 import { Readable } from "stream";
@@ -152,7 +152,7 @@ export const addStudent = async (req, res) => {
     // 🔵 5️⃣ SEND EMAIL (DO NOT BREAK API IF IT FAILS)
     try {
       console.log(`📧 Attempting to send email to: ${email}`);
-      await sendInstructorInvite(email, fullName); // Using same email template for now
+      await sendStudentInvite(email, fullName);
       console.log(`✅ Email sent successfully to: ${email}`);
     } catch (mailError) {
       console.error("SMTP failed:", mailError);
@@ -634,7 +634,7 @@ export const bulkUploadStudents = async (req, res) => {
 
         // Send email (non-blocking)
         try {
-          await sendInstructorInvite(email, fullName); // Using same email template
+          await sendStudentInvite(email, fullName);
           console.log(`  📧 Email sent to: ${email}`);
         } catch (emailError) {
           console.error(`  ⚠️ Email failed for ${email}:`, emailError.message);
