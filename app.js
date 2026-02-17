@@ -176,12 +176,20 @@ io.on("connection", (socket) => {
         const savedMsg = result.rows[0];
         console.log(`✅ ${isAdminGroup ? 'Admin' : 'College'} group message saved:`, savedMsg);
 
+        // Fetch sender's role
+        const senderRoleRes = await pool.query(
+          'SELECT role FROM users WHERE user_id = $1',
+          [senderId]
+        );
+        const senderRole = senderRoleRes.rows.length > 0 ? senderRoleRes.rows[0].role : 'user';
+
         // Construct Payload with File URL if needed
         const payload = {
           ...savedMsg,
           text: savedMsg.text ?? savedMsg.message ?? text ?? "",
           sender_uid: senderUid,
           sender_name: senderName,
+          sender_role: senderRole,
           attachment_url: savedMsg.attachment_file_id
             ? `${baseUrl}/api/chats/media/${savedMsg.attachment_file_id}`
             : null,

@@ -435,7 +435,8 @@ export const getGroupMessages = async (req, res) => {
          m.attachment_file_id,
          m.attachment_type,
          m.attachment_name,
-         u.full_name AS sender_name
+         u.full_name AS sender_name,
+         u.role AS sender_role
        FROM admin_group_messages m
        JOIN users u ON m.sender_id = u.user_id
        WHERE m.group_id = $1
