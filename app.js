@@ -28,6 +28,8 @@ import contestRoutes from "./routes/contest.routes.js";
 import contestQuestionRoutes from "./routes/contestQuestion.routes.js";
 import contestAdvancedRoutes from "./routes/contestAdvanced.routes.js";
 import { router as admingroupsRoutes } from "./routes/admingroups.routes.js";
+import courseCommentsRoutes from "./routes/courseComments.routes.js";
+
 
 const app = express();
 app.set("trust proxy", 1);
@@ -81,6 +83,8 @@ app.use("/api/contests", contestRoutes)
 app.use("/api/contests", contestQuestionRoutes);
 app.use("/api/contests", contestAdvancedRoutes);
 app.use("/api/admingroups", admingroupsRoutes); // Admin group management routes
+app.use("/api", courseCommentsRoutes);
+
 
 app.get("/", (req, res) => {
   res.send("API is running 🚀");
