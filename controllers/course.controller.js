@@ -274,18 +274,68 @@ export const getApprovedCoursesForInstructor = async (req, res) => {
 export const getInstructorCourseStats = async (req, res) => {
   try {
     const instructorId = req.user.id;
+    let { startDate, endDate } = req.query;
 
-    const { rows } = await pool.query(
+    // If no date filters provided, return all-time totals
+    if (!startDate || !endDate) {
+      const { rows } = await pool.query(
+        `
+        SELECT 
+          COUNT(*) AS total_courses,
+          AVG(rating) AS avg_rating
+        FROM courses
+        WHERE instructor_id = $1
+        `,
+        [instructorId],
+      );
+
+      return res.json({
+        total_courses: rows[0].total_courses || 0,
+        avg_rating: rows[0].avg_rating || 0,
+        coursesChange: 0
+      });
+    }
+
+    // Calculate previous period (same duration) for change percentages
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const durationMs = end - start;
+    const prevEnd = new Date(start.getTime() - 86400000); // 1 day before start
+    const prevStart = new Date(prevEnd.getTime() - durationMs);
+    const prevStartDate = prevStart.toISOString().slice(0, 10);
+    const prevEndDate = prevEnd.toISOString().slice(0, 10);
+
+    // Current period - Courses created in this period
+    const currentResult = await pool.query(
       `
       SELECT 
-        COUNT(*) AS total_courses
+        COUNT(*) AS total_courses,
+        AVG(rating) AS avg_rating
       FROM courses
-      WHERE instructor_id = $1
+      WHERE instructor_id = $1 AND created_at::date BETWEEN $2 AND $3
       `,
-      [instructorId],
+      [instructorId, startDate, endDate]
     );
 
-    res.json(rows[0]);
+    // Previous period - Courses created in previous period
+    const prevResult = await pool.query(
+      `
+      SELECT COUNT(*) AS total_courses
+      FROM courses
+      WHERE instructor_id = $1 AND created_at::date BETWEEN $2 AND $3
+      `,
+      [instructorId, prevStartDate, prevEndDate]
+    );
+
+    const currentCourses = Number(currentResult.rows[0].total_courses) || 0;
+    const prevCourses = Number(prevResult.rows[0].total_courses) || 0;
+    const coursesChange = prevCourses > 0 ? ((currentCourses - prevCourses) / prevCourses * 100).toFixed(2) : 0;
+
+    res.json({
+      total_courses: currentCourses,
+      avg_rating: currentResult.rows[0].avg_rating || 0,
+      coursesChange
+    });
   } catch (err) {
     console.error("Instructor course stats error:", err);
     res.status(500).json({ message: "Failed to fetch course stats" });
