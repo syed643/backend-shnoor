@@ -1,163 +1,208 @@
 import pool from "../../db/postgres.js";
 import { issueExamCertificate } from "../certificate.controller.js";
 import { autoGradeDescriptive } from "./examdescriptive.controller.js";
+
 export const submitExam = async (req, res) => {
   const client = await pool.connect();
 
   try {
     const { examId } = req.params;
     const studentId = req.user.id;
+
     if (!studentId) {
-  return res.status(401).json({
-    message: "Unauthorized: student ID not found"
-  });
-}
-    const { answers } = req.body;
-
-    const isArrayAnswers = Array.isArray(answers);
-    const isObjectAnswers =
-      answers && typeof answers === "object" && !Array.isArray(answers);
-
-    if (
-      !answers ||
-      (isArrayAnswers && answers.length === 0) ||
-      (isObjectAnswers && Object.keys(answers).length === 0)
-    ) {
-      return res.status(400).json({ message: "No answers submitted" });
+      return res.status(401).json({
+        message: "Unauthorized: student ID not found"
+      });
     }
-
-    const normalizedAnswers = isArrayAnswers
-      ? answers
-      : Object.entries(answers).map(([questionId, value]) => ({
-          question_id: questionId,
-          value
-        }));
 
     await client.query("BEGIN");
 
-    let totalMarks = 0;
-    let obtainedMarks = 0;
+    /* =========================
+       1️⃣ CHECK IF ALREADY SUBMITTED
+    ========================= */
+    const { rows: existingResult } = await client.query(
+      `
+      SELECT 1 FROM exam_results
+      WHERE exam_id = $1 AND student_id = $2
+      `,
+      [examId, studentId]
+    );
+
+    if (existingResult.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: "Exam already submitted"
+      });
+    }
+
+    /* =========================
+       2️⃣ FETCH ALL QUESTIONS
+    ========================= */
     const { rows: questions } = await client.query(
       `
-      SELECT question_id, marks, question_type, keywords, min_word_count
+      SELECT question_id, marks, question_type
       FROM exam_questions
       WHERE exam_id = $1
       `,
       [examId]
     );
 
-    const questionMap = {};
-    questions.forEach((q) => {
-      if (q.question_type === "mcq" || q.question_type === "descriptive") {
-        questionMap[q.question_id] = q;
-        totalMarks += q.marks;
-      }
+    let totalMarks = 0;
+    questions.forEach(q => {
+      totalMarks += q.marks;
     });
 
-    for (const ans of normalizedAnswers) {
-      const question = questionMap[ans.question_id];
-      if (!question) continue;
+    /* =========================
+       3️⃣ FETCH SAVED ANSWERS
+    ========================= */
+    const { rows: savedAnswers } = await client.query(
+      `
+      SELECT 
+        ea.question_id,
+        ea.selected_option_id,
+        ea.answer_text,
+        ea.marks_obtained,
+        eq.question_type,
+        eq.marks,
+        eo.is_correct,
+        eo.option_id,
+        pg_typeof(ea.selected_option_id) as selected_option_type,
+        pg_typeof(eo.option_id) as option_id_type
+      FROM exam_answers ea
+      JOIN exam_questions eq 
+        ON ea.question_id = eq.question_id
+      LEFT JOIN exam_mcq_options eo
+        ON ea.selected_option_id = eo.option_id
+      WHERE ea.exam_id = $1
+      AND ea.student_id = $2
+      `,
+      [examId, studentId]
+    );
 
-      let marksObtained = 0;
+    console.log("📋 DEBUG - Saved Answers Retrieved:", JSON.stringify(savedAnswers, null, 2));
 
-      if (question.question_type === "mcq") {
-        const selectedOptionId = ans.selected_option_id ?? null;
-        const selectedOptionText =
-          ans.selected_option_text ?? ans.value ?? ans.selected_option ?? null;
-        let optionIdToStore = selectedOptionId;
-
-        if (!optionIdToStore && selectedOptionText) {
-          const optionLookup = await client.query(
-            `
-            SELECT option_id, is_correct
-            FROM exam_mcq_options
-            WHERE question_id = $1 AND option_text = $2
-            `,
-            [ans.question_id, String(selectedOptionText).trim()]
-          );
-
-          if (optionLookup.rows.length) {
-            optionIdToStore = optionLookup.rows[0].option_id;
-            if (optionLookup.rows[0].is_correct) {
-              marksObtained = question.marks;
-              obtainedMarks += marksObtained;
-            }
-          }
-        }
-
-        if (!optionIdToStore) {
-          const err = new Error("MCQ option not found");
-          err.status = 400;
-          throw err;
-        }
-
-        const { rows } = await client.query(
+    // For each question, also fetch ALL available options to compare
+    for (const answer of savedAnswers) {
+      if (answer.question_type === "mcq") {
+        const { rows: allOptions } = await client.query(
           `
-          SELECT is_correct
+          SELECT option_id, option_text, is_correct
           FROM exam_mcq_options
-          WHERE option_id = $1
+          WHERE question_id = $1
+          ORDER BY option_order
           `,
-          [optionIdToStore]
+          [answer.question_id]
         );
-
-        if (!marksObtained && rows.length && rows[0].is_correct) {
-          marksObtained = question.marks;
-          obtainedMarks += marksObtained;
-        }
-
-        await client.query(
-          `
-          INSERT INTO exam_answers
-            (exam_id, question_id, student_id, selected_option_id, marks_obtained)
-          VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT ON CONSTRAINT unique_answer_per_question
-          DO UPDATE SET
-            selected_option_id = EXCLUDED.selected_option_id,
-            marks_obtained = EXCLUDED.marks_obtained
-          `,
-          [
-            examId,
-            ans.question_id,
-            studentId,
-            optionIdToStore,
-            marksObtained,
-          ]
-        );
+        console.log(`📝 Q${answer.question_id} - All options:`, allOptions);
+        console.log(`📝 Q${answer.question_id} - Student selected: ${answer.selected_option_id} (type: ${typeof answer.selected_option_id})`);
       }
-
-      if (question.question_type === "descriptive") {
-        const answerText =
-          ans.answer_text ?? ans.value ?? ans.text ?? ans.response ?? "";
-        
-        // Auto-grade based on word count and keywords
-        const keywords = question.keywords || [];
-        const minWordCount = question.min_word_count || 30;
-        const marksObtained = autoGradeDescriptive(
-          answerText,
-          keywords,
-          minWordCount,
-          question.marks
-        );
-        obtainedMarks += marksObtained;
-        
-        await client.query(
-          `
-          INSERT INTO exam_answers
-            (exam_id, question_id, student_id, answer_text, marks_obtained)
-          VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT ON CONSTRAINT unique_answer_per_question
-          DO UPDATE SET
-            answer_text = EXCLUDED.answer_text,
-            marks_obtained = EXCLUDED.marks_obtained
-          `,
-          [examId, ans.question_id, studentId, answerText, marksObtained]
-        );
+      
+      if (answer.question_type === "descriptive") {
+        console.log(`📝 Q${answer.question_id} - Descriptive answer:`, {
+          answer_length: answer.answer_text?.length || 0,
+          answer_preview: answer.answer_text?.substring(0, 100) + '...'
+        });
       }
-      // Coding submissions are ignored for now.
     }
 
+    let obtainedMarks = 0;
+
+    /* =========================
+       4️⃣ CALCULATE MARKS
+    ========================= */
+    savedAnswers.forEach(answer => {
+      console.log(`🔍 Checking answer for Q${answer.question_id}:`, {
+        type: answer.question_type,
+        selected_option_id: answer.selected_option_id,
+        option_id_from_join: answer.option_id,
+        is_correct: answer.is_correct,
+        marks: answer.marks,
+        types: {
+          selected_option_id: typeof answer.selected_option_id,
+          option_id: typeof answer.option_id
+        }
+      });
+
+      if (answer.question_type === "mcq") {
+        if (answer.is_correct) {
+          obtainedMarks += answer.marks;
+        } else {
+        }
+      }
+
+      if (answer.question_type === "descriptive") {
+        console.log(`📝 Descriptive Q${answer.question_id}:`, {
+          stored_marks: answer.marks_obtained,
+          answer_text_length: answer.answer_text?.length || 0
+        });
+        obtainedMarks += answer.marks_obtained || 0;
+      }
+
+      // Coding questions ignored for now
+    });
+
+    /* =========================
+       4.5️⃣ AUTO-GRADE DESCRIPTIVE QUESTIONS
+    ========================= */
+    console.log("🤖 Auto-grading descriptive questions...");
+    
+    for (const answer of savedAnswers) {
+      if (answer.question_type === "descriptive" && answer.answer_text) {
+        // Fetch question details for grading criteria
+        const { rows: questionDetails } = await client.query(
+          `
+          SELECT keywords, min_word_count, marks
+          FROM exam_questions
+          WHERE question_id = $1
+          `,
+          [answer.question_id]
+        );
+
+        if (questionDetails.length > 0) {
+          const q = questionDetails[0];
+          const calculatedMarks = autoGradeDescriptive(
+            answer.answer_text,
+            q.keywords,
+            q.min_word_count || 30,
+            q.marks
+          );
+
+          console.log(`🤖 Auto-graded Q${answer.question_id}:`, {
+            answer_length: answer.answer_text.length,
+            word_count: answer.answer_text.trim().split(/\s+/).length,
+            min_word_count: q.min_word_count,
+            keywords: q.keywords,
+            max_marks: q.marks,
+            calculated_marks: calculatedMarks,
+            old_marks: answer.marks_obtained
+          });
+
+          // Update the marks_obtained in exam_answers
+          await client.query(
+            `
+            UPDATE exam_answers
+            SET marks_obtained = $1
+            WHERE exam_id = $2
+            AND question_id = $3
+            AND student_id = $4
+            `,
+            [calculatedMarks, examId, answer.question_id, studentId]
+          );
+
+          // Add to obtainedMarks (subtract old value first since we already added it)
+          obtainedMarks -= (answer.marks_obtained || 0);
+          obtainedMarks += calculatedMarks;
+        }
+      }
+    }
+
+    /* =========================
+       5️⃣ CALCULATE RESULT
+    ========================= */
     const percentage =
-      totalMarks === 0 ? 0 : Math.round((obtainedMarks / totalMarks) * 100);
+      totalMarks === 0
+        ? 0
+        : Math.round((obtainedMarks / totalMarks) * 100);
 
     const { rows: exam } = await client.query(
       `
@@ -169,37 +214,54 @@ export const submitExam = async (req, res) => {
     );
 
     if (!exam.length) {
-      const err = new Error("Exam not found");
-      err.status = 404;
-      throw err;
+      throw new Error("Exam not found");
     }
 
     const passed = percentage >= exam[0].pass_percentage;
 
+    /* =========================
+       6️⃣ SAVE RESULT
+    ========================= */
     await client.query(
       `
       INSERT INTO exam_results
         (exam_id, student_id, total_marks, obtained_marks, percentage, passed, evaluated_at)
       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-      ON CONFLICT (exam_id, student_id)
-      DO UPDATE SET
-        total_marks = EXCLUDED.total_marks,
-        obtained_marks = EXCLUDED.obtained_marks,
-        percentage = EXCLUDED.percentage,
-        passed = EXCLUDED.passed,
-        evaluated_at = NOW()
       `,
       [examId, studentId, totalMarks, obtainedMarks, percentage, passed]
     );
 
+    /* =========================
+       7️⃣ MARK ATTEMPT AS SUBMITTED
+    ========================= */
+    await client.query(
+      `
+      UPDATE exam_attempts
+      SET status = 'submitted',
+          submitted_at = NOW()
+      WHERE exam_id = $1
+      AND student_id = $2
+      `,
+      [examId, studentId]
+    );
+
     await client.query("COMMIT");
 
-    // Auto-issue certificate if exam passed and no coding questions present
+    /* =========================
+       8️⃣ ISSUE CERTIFICATE (OPTIONAL)
+    ========================= */
     let certificateIssued = false;
+
     if (passed) {
       try {
         const hasCoding = await pool.query(
-          `SELECT 1 FROM exam_questions WHERE exam_id = $1 AND question_type = 'coding' LIMIT 1`,
+          `
+          SELECT 1
+          FROM exam_questions
+          WHERE exam_id = $1
+          AND question_type = 'coding'
+          LIMIT 1
+          `,
           [examId]
         );
 
@@ -209,11 +271,11 @@ export const submitExam = async (req, res) => {
             examId,
             score: percentage
           });
-          certificateIssued = certResult.issued;
+
+          certificateIssued = certResult?.issued || false;
         }
       } catch (certErr) {
-        console.error("Certificate issuance error:", certErr);
-        // Don't fail the exam submission if certificate fails
+        console.error("Certificate error:", certErr);
       }
     }
 
@@ -225,14 +287,17 @@ export const submitExam = async (req, res) => {
       passed,
       certificateIssued
     });
+
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Submit exam error:", err);
-    const status = err.status || 500;
-    res.status(status).json({
-      message: err.status ? err.message : "Failed to submit exam"
+
+    res.status(500).json({
+      message: "Failed to submit exam"
     });
+
   } finally {
     client.release();
   }
 };
+

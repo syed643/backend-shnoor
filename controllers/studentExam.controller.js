@@ -73,6 +73,18 @@ export const getExamForAttempt = async (req, res) => {
       }
     }
 
+    await pool.query(
+      `
+      INSERT INTO exam_attempts (exam_id, student_id, status)
+      VALUES ($1, $2, 'in_progress')
+      ON CONFLICT (exam_id, student_id)
+      DO UPDATE 
+      SET status = 'in_progress'
+      WHERE exam_attempts.status != 'submitted'
+      `,
+      [examId, studentId],
+    );
+
     /* =========================
        3️⃣ FETCH QUESTIONS
     ========================= */
@@ -92,7 +104,7 @@ export const getExamForAttempt = async (req, res) => {
               'type', q.question_type,
               'marks', q.marks,
               'options', (
-               SELECT json_agg(o.option_text ORDER BY o.option_order)
+               SELECT json_agg(json_build_object('id', o.option_id, 'text', o.option_text) ORDER BY o.option_order)
 FROM exam_mcq_options o
 WHERE o.question_id = q.question_id
   AND o.option_text IS NOT NULL
@@ -185,14 +197,14 @@ export const submitExam = async (req, res) => {
       LEFT JOIN exam_mcq_options o ON q.question_id = o.question_id
       WHERE q.exam_id = $1
       `,
-      [examId]
+      [examId],
     );
 
     let totalMarks = 0;
     let obtainedMarks = 0;
 
     const questionMap = {};
-    questions.forEach(q => {
+    questions.forEach((q) => {
       if (!questionMap[q.question_id]) {
         questionMap[q.question_id] = q;
         totalMarks += q.marks;
@@ -212,9 +224,10 @@ export const submitExam = async (req, res) => {
         const selectedOptionId = answer;
 
         const correct = questions.find(
-          q => q.question_id === questionId &&
-               q.option_id === selectedOptionId &&
-               q.is_correct
+          (q) =>
+            q.question_id === questionId &&
+            q.option_id === selectedOptionId &&
+            q.is_correct,
         );
 
         if (correct) {
@@ -232,7 +245,7 @@ export const submitExam = async (req, res) => {
             selected_option_id = EXCLUDED.selected_option_id,
             marks_obtained = EXCLUDED.marks_obtained
           `,
-          [examId, questionId, studentId, selectedOptionId, marksObtained]
+          [examId, questionId, studentId, selectedOptionId, marksObtained],
         );
       }
     }
@@ -245,7 +258,7 @@ export const submitExam = async (req, res) => {
 
     const { rows } = await client.query(
       `SELECT pass_percentage FROM exams WHERE exam_id = $1`,
-      [examId]
+      [examId],
     );
 
     const passed = percentage >= rows[0].pass_percentage;
@@ -266,7 +279,18 @@ export const submitExam = async (req, res) => {
         passed = EXCLUDED.passed,
         evaluated_at = NOW()
       `,
-      [examId, studentId, totalMarks, obtainedMarks, percentage, passed]
+      [examId, studentId, totalMarks, obtainedMarks, percentage, passed],
+    );
+
+    await client.query(
+      `
+  UPDATE exam_attempts
+  SET status = 'submitted',
+      submitted_at = NOW()
+  WHERE exam_id = $1
+  AND student_id = $2
+  `,
+      [examId, studentId],
     );
 
     await client.query("COMMIT");
@@ -276,9 +300,8 @@ export const submitExam = async (req, res) => {
       totalMarks,
       obtainedMarks,
       percentage,
-      passed
+      passed,
     });
-
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("submitExam error:", err);
@@ -289,96 +312,48 @@ export const submitExam = async (req, res) => {
 };
 
 
-{
-  /*export const submitExam = async (req, res) => {
-  try {
-    const { examId } = req.params;
-    const studentId = req.user.id;
-    const { answers } = req.body;
+export const autoSubmitExam = async (studentId, examId) => {
+  const client = await pool.connect();
 
-    // 1️⃣ Prevent re-attempt
-    const attempted = await pool.query(
+  try {
+    await client.query("BEGIN");
+
+    // Check if already submitted
+    const { rows } = await client.query(
       `
-      SELECT 1
-      FROM exam_results
-      WHERE exam_id = $1 AND student_id = $2
+      SELECT status
+      FROM exam_attempts
+      WHERE exam_id = $1
+      AND student_id = $2
       `,
-      [examId, studentId],
+      [examId, studentId]
     );
 
-    if (attempted.rowCount > 0) {
-      return res.status(400).json({
-        message: "Exam already submitted",
-      });
+    if (!rows.length || rows[0].status === "submitted") {
+      await client.query("ROLLBACK");
+      return;
     }
 
-    // 2️⃣ Fetch correct answers
-    const questions = await pool.query(
+    // Submit with whatever answers saved so far
+    await client.query(
       `
-  SELECT
-    q.question_id,
-    q.question_type,
-    q.marks,
-    o.option_text AS correct_answer
-  FROM exam_questions q
-  LEFT JOIN exam_mcq_options o
-    ON o.question_id = q.question_id
-   AND o.is_correct = true
-  WHERE q.exam_id = $1
-  `,
-      [examId],
-    );
-
-    let score = 0;
-    let total = 0;
-
-    questions.rows.forEach((q) => {
-      total += q.marks || 0;
-
-      if (q.type === "mcq" && answers[q.question_id] === q.correct_answer) {
-        score += q.marks;
-      }
-    });
-
-    const percentage = total === 0 ? 0 : Math.round((score / total) * 100);
-
-    // 3️⃣ Save raw submission (audit trail)
-    await pool.query(
-      `
-      INSERT INTO exam_submissions (exam_id, student_id, answers)
-      VALUES ($1, $2, $3)
+      UPDATE exam_attempts
+      SET status = 'submitted',
+          submitted_at = NOW()
+      WHERE exam_id = $1
+      AND student_id = $2
       `,
-      [examId, studentId, answers],
+      [examId, studentId]
     );
 
-    // 4️⃣ Save final result
-    await pool.query(
-      `
-      INSERT INTO exam_results (exam_id, student_id, score, percentage)
-      VALUES ($1, $2, $3, $4)
-      `,
-      [examId, studentId, score, percentage],
-    );
+    await client.query("COMMIT");
 
-    // 5️⃣ Award XP (backend-side)
-    await pool.query(
-      `
-      UPDATE users
-      SET xp = COALESCE(xp, 0) + 50
-      WHERE user_id = $1
-      `,
-      [studentId],
-    );
+    console.log(`Auto-submitted exam ${examId} for student ${studentId}`);
 
-    return res.json({
-      percentage,
-      passed: percentage >= 60,
-    });
   } catch (err) {
-    console.error("submitExam error:", err);
-    return res.status(500).json({
-      message: "Failed to submit exam",
-    });
+    await client.query("ROLLBACK");
+    console.error("Auto submit error:", err);
+  } finally {
+    client.release();
   }
-};*/
-}
+};

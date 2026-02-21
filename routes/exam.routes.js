@@ -23,7 +23,10 @@ import {
 import {
   createExam,
   getInstructorExams,
-  getAllExamsForStudents
+  getAllExamsForStudents,
+  setExamGraceTimer,
+  getAllExamsAdmin,
+  saveAnswer
 } from "../controllers/exams/exam.controller.js";
 
 import { addDescriptiveQuestion } from "../controllers/exams/examdescriptive.controller.js";
@@ -147,4 +150,29 @@ router.get(
   roleGuard("student", "learner"),
   getAllExamsForStudents
 );
+
+router.put(
+  "/admin/:examId/grace-timer",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  setExamGraceTimer
+);
+
+router.get(
+  "/admin",
+  firebaseAuth,
+  attachUser,
+  roleGuard("admin"),
+  getAllExamsAdmin
+);
+
+router.post(
+  "/:examId/save-answer",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner"),
+  saveAnswer
+);
+
 export default router;

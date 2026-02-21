@@ -53,7 +53,6 @@ export const getMyNotifications = async (req, res) => {
             [userId]
         );
 
-        console.log(`Fetched ${result.rows.length} notifications for user ${userId}`);
         res.json(result.rows);
     } catch (error) {
         console.error("Get notifications error:", error);
