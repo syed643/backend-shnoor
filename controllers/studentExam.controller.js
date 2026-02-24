@@ -188,7 +188,19 @@ export const submitExam = async (req, res) => {
     await client.query("BEGIN");
 
     /* =========================
-       1️⃣ FETCH QUESTIONS
+       1️⃣ CLEAR PREVIOUS ANSWERS (ALLOW REWRITE)
+    ========================= */
+    // Delete previous answers to allow clean resubmission
+    await client.query(
+      `
+      DELETE FROM exam_answers
+      WHERE exam_id = $1 AND student_id = $2
+      `,
+      [examId, studentId]
+    );
+
+    /* =========================
+       2️⃣ FETCH QUESTIONS
     ========================= */
     const { rows: questions } = await client.query(
       `
@@ -212,7 +224,7 @@ export const submitExam = async (req, res) => {
     });
 
     /* =========================
-       2️⃣ SAVE ANSWERS (UPSERT)
+       3️⃣ SAVE ANSWERS (UPSERT)
     ========================= */
     for (const [questionId, answer] of Object.entries(answers)) {
       const question = questionMap[questionId];
@@ -251,7 +263,7 @@ export const submitExam = async (req, res) => {
     }
 
     /* =========================
-       3️⃣ CALCULATE RESULT
+       4️⃣ CALCULATE RESULT
     ========================= */
     const percentage =
       totalMarks === 0 ? 0 : Math.round((obtainedMarks / totalMarks) * 100);

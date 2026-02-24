@@ -18,22 +18,16 @@ export const submitExam = async (req, res) => {
     await client.query("BEGIN");
 
     /* =========================
-       1️⃣ CHECK IF ALREADY SUBMITTED
+       1️⃣ CLEAR PREVIOUS ANSWERS (ALLOW REWRITE)
     ========================= */
-    const { rows: existingResult } = await client.query(
+    // Delete previous answers to allow clean resubmission
+    await client.query(
       `
-      SELECT 1 FROM exam_results
+      DELETE FROM exam_answers
       WHERE exam_id = $1 AND student_id = $2
       `,
       [examId, studentId]
     );
-
-    if (existingResult.length > 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        message: "Exam already submitted"
-      });
-    }
 
     /* =========================
        2️⃣ FETCH ALL QUESTIONS
@@ -220,13 +214,20 @@ export const submitExam = async (req, res) => {
     const passed = percentage >= exam[0].pass_percentage;
 
     /* =========================
-       6️⃣ SAVE RESULT
+       6️⃣ SAVE RESULT (UPSERT - ALLOW REWRITE)
     ========================= */
     await client.query(
       `
       INSERT INTO exam_results
         (exam_id, student_id, total_marks, obtained_marks, percentage, passed, evaluated_at)
       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (exam_id, student_id)
+      DO UPDATE SET
+        total_marks = EXCLUDED.total_marks,
+        obtained_marks = EXCLUDED.obtained_marks,
+        percentage = EXCLUDED.percentage,
+        passed = EXCLUDED.passed,
+        evaluated_at = NOW()
       `,
       [examId, studentId, totalMarks, obtainedMarks, percentage, passed]
     );

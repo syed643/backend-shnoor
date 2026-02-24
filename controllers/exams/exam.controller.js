@@ -287,3 +287,48 @@ export const autoSubmitExam = async (studentId, examId) => {
     client.release();
   }
 };
+export const createRewriteAttempt = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+
+    await client.query("BEGIN");
+
+    // Clear previous answers for fresh attempt
+    await client.query(
+      `
+      DELETE FROM exam_answers
+      WHERE exam_id = $1 AND student_id = $2
+      `,
+      [examId, studentId]
+    );
+
+    // Reset attempt status to in_progress  
+    await client.query(
+      `
+      INSERT INTO exam_attempts (exam_id, student_id, status)
+      VALUES ($1, $2, 'in_progress')
+      ON CONFLICT (exam_id, student_id)
+      DO UPDATE 
+      SET status = 'in_progress',
+          submitted_at = NULL
+      `,
+      [examId, studentId]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(200).json({
+      message: "Rewrite attempt created successfully"
+    });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Create rewrite attempt error:", err);
+    res.status(500).json({ message: "Failed to create rewrite attempt" });
+  } finally {
+    client.release();
+  }
+};
