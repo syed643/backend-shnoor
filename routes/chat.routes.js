@@ -26,7 +26,8 @@ import {
     removeMember,
     addReaction,
     removeReaction,
-    serveFile
+    serveFile,
+    searchMessages
 } from "../controllers/chat.controller.js";
 import firebaseAuth from "../middlewares/firebaseAuth.js";
 import attachUser from "../middlewares/attachUser.js";
@@ -46,6 +47,7 @@ router.get("/available-instructors", firebaseAuth, attachUser, getAvailableInstr
 router.post("/", firebaseAuth, attachUser, createChat);
 router.post("/upload", firebaseAuth, attachUser, upload.single('file'), uploadFile);
 router.put("/read", firebaseAuth, attachUser, markRead);
+router.get("/search", firebaseAuth, attachUser, searchMessages);
 
 // Groups
 router.post("/groups", firebaseAuth, attachUser, createGroup);
