@@ -2,7 +2,8 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import pool from "./db/postgres.js";
-import { initializeSocket } from "./services/socket.js";
+import admin from "firebase-admin";
+import { autoSubmitExam } from "./controllers/exams/exam.controller.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
@@ -43,8 +44,45 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
+  pingInterval: 5000,
+  pingTimeout: 8000,
 });
 global.io = io;
+
+/* =====================================
+   🔐 SOCKET AUTH MIDDLEWARE
+   Verify Firebase Token
+===================================== */
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+
+    if (!token) {
+      // Allow connection without token for chat (backward compatibility)
+      return next();
+    }
+
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    // Get actual DB user_id (UUID)
+    const { rows } = await pool.query(
+      `SELECT user_id FROM users WHERE firebase_uid = $1`,
+      [decoded.uid]
+    );
+
+    if (!rows.length) {
+      return next(new Error("User not found in database"));
+    }
+
+    socket.userId = rows[0].user_id; // Real UUID from DB
+    socket.firebaseUid = decoded.uid; // Firebase UID
+    next();
+  } catch (err) {
+    console.error("Socket authentication error:", err);
+    // Allow connection to fail gracefully for chat
+    next();
+  }
+});
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -96,10 +134,108 @@ const userSockets = new Map(); // Map<userId, socketId>
 
 io.on("connection", (socket) => {
   console.log(`Socket Connected: ${socket.id}`);
+  if (socket.userId) {
+    console.log(`👤 Authenticated user: ${socket.userId}`);
+  }
 
   socket.on("join_user", (userId) => {
     socket.join(`user_${userId}`);
     console.log(`User ${userId} joined room user_${userId}`);
+  });
+
+  /* =========================
+     STUDENT STARTS EXAM
+  ========================= */
+  socket.on("exam:start", async ({ examId }) => {
+    const userId = socket.userId;
+    socket.examId = examId;
+
+    console.log(`📝 User ${userId} started exam ${examId}`);
+    console.log(`🔍 Checking disconnect state for user ${userId}, exam ${examId}`);
+
+    if (!userId || !examId) {
+      console.log(`⚠️ exam:start ignored - no userId or examId`);
+      return;
+    }
+
+    // Check if exam was auto-submitted during disconnection
+    try {
+      console.log(`🔍 Checking if exam ${examId} was auto-submitted for user ${userId}...`);
+      const { rows } = await pool.query(
+        `
+        SELECT ea.status, ea.disconnected_at, ea.end_time, e.disconnect_grace_time
+        FROM exam_attempts ea
+        JOIN exams e ON e.exam_id = ea.exam_id
+        WHERE ea.exam_id = $1 AND ea.student_id = $2
+        `,
+        [examId, userId]
+      );
+
+      console.log(`📊 Query result:`, rows);
+
+      if (rows.length > 0 && rows[0].status === 'submitted') {
+        console.log(`🚨🚨🚨 Exam ${examId} was auto-submitted for user ${userId} during disconnection`);
+        console.log(`📤 Emitting exam:autoSubmitted event to socket ${socket.id}`);
+        
+        socket.emit("exam:autoSubmitted", {
+          examId,
+          message: "Exam was auto-submitted due to disconnection",
+        });
+        
+        console.log(`✅ Event emitted successfully`);
+      } else if (rows.length > 0) {
+        const disconnectedAt = rows[0].disconnected_at;
+        const endTime = rows[0].end_time;
+        const graceSeconds = rows[0].disconnect_grace_time || 0;
+        const { rows: nowRows } = await pool.query(`SELECT NOW() AS now`);
+        const now = nowRows[0].now;
+
+        const deadlineMs = endTime
+          ? new Date(endTime).getTime() + graceSeconds * 1000
+          : null;
+
+        if (deadlineMs && new Date(now).getTime() > deadlineMs) {
+          console.log(`🚨 Attempt exceeded end time. Auto-submitting exam ${examId} for user ${userId}`);
+          await autoSubmitExam(userId, examId);
+          socket.emit("exam:autoSubmitted", {
+            examId,
+            message: "Exam auto-submitted due to time expiry",
+          });
+          return;
+        }
+
+        if (disconnectedAt) {
+          const offlineSeconds = Math.floor((new Date(now).getTime() - new Date(disconnectedAt).getTime()) / 1000);
+
+          console.log(`⏱️ Offline duration: ${offlineSeconds}s (grace ${graceSeconds}s)`);
+
+          if (offlineSeconds > graceSeconds) {
+            console.log(`🚨 Offline grace exceeded. Auto-submitting exam ${examId} for user ${userId}`);
+            await autoSubmitExam(userId, examId);
+            socket.emit("exam:autoSubmitted", {
+              examId,
+              message: "Exam auto-submitted due to disconnection",
+            });
+          } else {
+            await pool.query(
+              `
+              UPDATE exam_attempts
+              SET disconnected_at = NULL
+              WHERE exam_id = $1 AND student_id = $2
+              `,
+              [examId, userId]
+            );
+            console.log(`✅ Reconnected within grace. Cleared disconnected_at.`);
+          }
+        } else {
+          console.log(`✓ Exam ${examId} not yet submitted, continuing normally`);
+        }
+      } else {
+        console.log(`⚠️ No attempt found for exam ${examId}, user ${userId}`);
+      }
+    } catch (err) {
+      console.error("❌ Error checking exam status on reconnect:", err);
+    }
   });
 
   socket.on("join_chat", (chatId) => {
@@ -297,8 +433,71 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    console.log("Socket Disconnected");
+  socket.on("disconnect", async () => {
+    console.log("Socket Disconnected:", socket.id);
+
+    // Handle exam disconnection tracking
+    const userId = socket.userId;
+
+    if (userId) {
+      console.log(`📍 Tracking disconnect for user: ${userId}`);
+      try {
+        // Find in-progress attempts that haven't expired yet
+        const { rows } = await pool.query(
+          `
+          SELECT ea.exam_id, ea.end_time, e.disconnect_grace_time
+          FROM exam_attempts ea
+          JOIN exams e ON e.exam_id = ea.exam_id
+          WHERE ea.student_id = $1 
+          AND ea.status = 'in_progress' 
+          AND ea.disconnected_at IS NULL
+          AND NOW() < ea.end_time + (COALESCE(e.disconnect_grace_time, 0) * INTERVAL '1 second')
+          `,
+          [userId]
+        );
+
+        if (rows.length === 0) {
+          console.log(`⚠️ No active in-progress attempts found for user ${userId}`);
+        } else {
+          // Mark attempts as disconnected only if within valid time window
+          for (const row of rows) {
+            await pool.query(
+              `
+              UPDATE exam_attempts
+              SET disconnected_at = NOW()
+              WHERE exam_id = $1
+              AND student_id = $2
+              AND status = 'in_progress'
+              `,
+              [row.exam_id, userId]
+            );
+            console.log(`📝 Marked disconnected_at for user ${userId}, exam ${row.exam_id}`);
+          }
+        }
+
+        // Auto-submit any attempts that exceeded deadline
+        const { rows: expiredRows } = await pool.query(
+          `
+          SELECT ea.exam_id
+          FROM exam_attempts ea
+          JOIN exams e ON e.exam_id = ea.exam_id
+          WHERE ea.student_id = $1 
+          AND ea.status = 'in_progress'
+          AND NOW() >= ea.end_time + (COALESCE(e.disconnect_grace_time, 0) * INTERVAL '1 second')
+          `,
+          [userId]
+        );
+
+        for (const row of expiredRows) {
+          console.log(`🚨 Auto-submitting expired exam ${row.exam_id} for user ${userId} on disconnect`);
+          await autoSubmitExam(userId, row.exam_id);
+        }
+
+      } catch (err) {
+        console.error("❌ Disconnect handling error:", err);
+        console.error(err.stack);
+      }
+    }
   });
 });
 
