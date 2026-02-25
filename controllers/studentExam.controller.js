@@ -1,4 +1,5 @@
 import pool from "../db/postgres.js";
+import { autoGradeDescriptive } from "./exams/examdescriptive.controller.js";
 
 export const getStudentExams = async (req, res) => {
   const studentId = req.user.id;
@@ -11,13 +12,17 @@ export const getStudentExams = async (req, res) => {
       e.duration,
       e.pass_percentage,
       c.title AS course_title,
-      er.exam_id IS NOT NULL AS attempted
+      er.exam_id IS NOT NULL AS attempted,
+      ea.status AS attempt_status
     FROM exams e
     JOIN courses c ON c.courses_id = e.course_id
     JOIN student_courses sc ON sc.course_id = c.courses_id
     LEFT JOIN exam_results er
       ON er.exam_id = e.exam_id AND er.student_id = $1
+    LEFT JOIN exam_attempts ea
+      ON ea.exam_id = e.exam_id AND ea.student_id = $1
     WHERE sc.student_id = $1
+      AND (ea.status IS NULL OR ea.status != 'submitted')
     ORDER BY e.created_at DESC
     `,
     [studentId],
@@ -73,20 +78,54 @@ export const getExamForAttempt = async (req, res) => {
       }
     }
 
-    await pool.query(
-      `
-      INSERT INTO exam_attempts (exam_id, student_id, status)
-      VALUES ($1, $2, 'in_progress')
-      ON CONFLICT (exam_id, student_id)
-      DO UPDATE 
-      SET status = 'in_progress'
-      WHERE exam_attempts.status != 'submitted'
-      `,
-      [examId, studentId],
+    /* =========================
+       3️⃣ CHECK IF ALREADY SUBMITTED
+    ========================= */
+    const attemptCheck = await pool.query(
+      `SELECT status FROM exam_attempts WHERE exam_id = $1 AND student_id = $2`,
+      [examId, studentId]
     );
 
+    if (attemptCheck.rows.length > 0 && attemptCheck.rows[0].status === 'submitted') {
+      return res.status(400).json({ 
+        message: "Exam already submitted",
+        alreadySubmitted: true
+      });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO exam_attempts (exam_id, student_id, status, start_time, end_time)
+      VALUES ($1, $2, 'in_progress', NOW(), NOW() + ($3 * INTERVAL '1 minute'))
+      ON CONFLICT (exam_id, student_id)
+      DO UPDATE 
+      SET status = 'in_progress',
+          start_time = COALESCE(exam_attempts.start_time, EXCLUDED.start_time),
+          end_time = COALESCE(exam_attempts.end_time, EXCLUDED.end_time),
+          disconnected_at = NULL
+      WHERE exam_attempts.status != 'submitted'
+      RETURNING start_time, end_time
+      `,
+      [examId, studentId, exam.duration],
+    );
+
+    // DEBUG: Log the timestamps being set
+    const debugAttempt = await pool.query(
+      `SELECT start_time, end_time, NOW() as db_now FROM exam_attempts WHERE exam_id = $1 AND student_id = $2`,
+      [examId, studentId]
+    );
+    console.log("🔍 Attempt timestamps created/fetched:", {
+      examId,
+      duration: exam.duration,
+      start_time: debugAttempt.rows[0].start_time,
+      end_time: debugAttempt.rows[0].end_time,
+      db_now: debugAttempt.rows[0].db_now,
+      expected_duration_ms: exam.duration * 60 * 1000,
+      actual_duration_ms: new Date(debugAttempt.rows[0].end_time) - new Date(debugAttempt.rows[0].start_time)
+    });
+
     /* =========================
-       3️⃣ FETCH QUESTIONS
+       4️⃣ FETCH QUESTIONS
     ========================= */
     const { rows } = await pool.query(
       `
@@ -124,7 +163,7 @@ WHERE o.question_id = q.question_id
     );
 
     /* =========================
-       4️⃣ SEND RESPONSE
+       5️⃣ SEND RESPONSE
     ========================= */
     const examPayload = rows[0];
 
@@ -181,6 +220,31 @@ export const submitExam = async (req, res) => {
     const studentId = req.user.id;
     const { answers } = req.body;
 
+    const { rows: attemptRows } = await client.query(
+      `
+      SELECT ea.end_time, e.disconnect_grace_time
+      FROM exam_attempts ea
+      JOIN exams e ON e.exam_id = ea.exam_id
+      WHERE ea.exam_id = $1 AND ea.student_id = $2
+      `,
+      [examId, studentId]
+    );
+
+    if (!attemptRows.length) {
+      return res.status(400).json({ message: "Exam attempt not found" });
+    }
+
+    const endTime = attemptRows[0].end_time;
+    const graceSeconds = attemptRows[0].disconnect_grace_time || 0;
+    const { rows: nowRows } = await client.query(`SELECT NOW() AS now`);
+    const now = nowRows[0].now;
+
+    const deadlineMs = new Date(endTime).getTime() + graceSeconds * 1000;
+
+    if (new Date(now).getTime() > deadlineMs) {
+      return res.status(403).json({ message: "Submission window closed" });
+    }
+
     if (!answers || Object.keys(answers).length === 0) {
       return res.status(400).json({ message: "No answers submitted" });
     }
@@ -227,18 +291,19 @@ export const submitExam = async (req, res) => {
        3️⃣ SAVE ANSWERS (UPSERT)
     ========================= */
     for (const [questionId, answer] of Object.entries(answers)) {
+      const questionIdNum = Number(questionId);
       const question = questionMap[questionId];
       if (!question) continue;
 
       let marksObtained = 0;
 
       if (question.question_type === "mcq") {
-        const selectedOptionId = answer;
+        const selectedOptionId = Number(answer);
 
         const correct = questions.find(
           (q) =>
-            q.question_id === questionId &&
-            q.option_id === selectedOptionId &&
+            Number(q.question_id) === questionIdNum &&
+            Number(q.option_id) === selectedOptionId &&
             q.is_correct,
         );
 
@@ -257,7 +322,45 @@ export const submitExam = async (req, res) => {
             selected_option_id = EXCLUDED.selected_option_id,
             marks_obtained = EXCLUDED.marks_obtained
           `,
-          [examId, questionId, studentId, selectedOptionId, marksObtained],
+          [examId, questionIdNum, studentId, selectedOptionId, marksObtained],
+        );
+      }
+
+      if (question.question_type === "descriptive") {
+        const answerText = typeof answer === "string" ? answer : "";
+
+        const { rows: questionDetails } = await client.query(
+          `
+          SELECT keywords, min_word_count, marks
+          FROM exam_questions
+          WHERE question_id = $1
+          `,
+          [questionIdNum]
+        );
+
+        const q = questionDetails[0];
+        const calculatedMarks = q
+          ? autoGradeDescriptive(
+              answerText,
+              q.keywords,
+              q.min_word_count || 30,
+              q.marks
+            )
+          : 0;
+
+        obtainedMarks += calculatedMarks;
+
+        await client.query(
+          `
+          INSERT INTO exam_answers
+            (exam_id, question_id, student_id, answer_text, marks_obtained)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT ON CONSTRAINT unique_answer_per_question
+          DO UPDATE SET
+            answer_text = EXCLUDED.answer_text,
+            marks_obtained = EXCLUDED.marks_obtained
+          `,
+          [examId, questionIdNum, studentId, answerText, calculatedMarks]
         );
       }
     }
@@ -296,12 +399,13 @@ export const submitExam = async (req, res) => {
 
     await client.query(
       `
-  UPDATE exam_attempts
-  SET status = 'submitted',
-      submitted_at = NOW()
-  WHERE exam_id = $1
-  AND student_id = $2
-  `,
+    UPDATE exam_attempts
+    SET status = 'submitted',
+      submitted_at = NOW(),
+      disconnected_at = NULL
+    WHERE exam_id = $1
+    AND student_id = $2
+    `,
       [examId, studentId],
     );
 
@@ -351,7 +455,8 @@ export const autoSubmitExam = async (studentId, examId) => {
       `
       UPDATE exam_attempts
       SET status = 'submitted',
-          submitted_at = NOW()
+          submitted_at = NOW(),
+          disconnected_at = NULL
       WHERE exam_id = $1
       AND student_id = $2
       `,

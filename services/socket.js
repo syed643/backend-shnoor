@@ -4,10 +4,6 @@ import { autoSubmitExam } from "../controllers/exams/exam.controller.js";
 import pool from "../db/postgres.js";
 import { sendPushNotification } from "./pushService.js";
 
-const activeExamSessions = new Map();
-// key = userId_examId
-// value = { timeoutId }
-
 let io = null;
 
 // Initialize Socket.IO server
@@ -72,23 +68,90 @@ export const initializeSocket = (httpServer) => {
     /* =========================
        STUDENT STARTS EXAM
     ========================= */
-    socket.on("exam:start", ({ examId }) => {
+    socket.on("exam:start", async ({ examId }) => {
       const userId = socket.userId;
-      const key = `${userId}_${examId}`;
-
       socket.examId = examId;
 
       console.log(`📝 User ${userId} started exam ${examId}`);
-      console.log(`🔍 Active sessions before reconnect check:`, activeExamSessions.has(key));
+      console.log(`🔍 Checking disconnect state for user ${userId}, exam ${examId}`);
 
-      // Cancel existing timer if reconnecting
-      if (activeExamSessions.has(key)) {
-        clearTimeout(activeExamSessions.get(key).timeoutId);
-        activeExamSessions.delete(key);
-        console.log(`✅ Reconnected in time! Timer cancelled for user ${userId}, exam ${examId}`);
-        console.log(`⏰ Timer was cancelled - exam will continue normally`);
-      } else {
-        console.log(`🆕 Fresh exam start (no previous disconnect timer)`);
+      // Check if exam was auto-submitted during disconnection
+      try {
+        console.log(`🔍 Checking if exam ${examId} was auto-submitted for user ${userId}...`);
+        const { rows } = await pool.query(
+          `
+          SELECT ea.status, ea.disconnected_at, ea.end_time, e.disconnect_grace_time
+          FROM exam_attempts ea
+          JOIN exams e ON e.exam_id = ea.exam_id
+          WHERE ea.exam_id = $1 AND ea.student_id = $2
+          `,
+          [examId, userId]
+        );
+
+        console.log(`📊 Query result:`, rows);
+
+        if (rows.length > 0 && rows[0].status === 'submitted') {
+          console.log(`🚨🚨🚨 Exam ${examId} was auto-submitted for user ${userId} during disconnection`);
+          console.log(`📤 Emitting exam:autoSubmitted event to socket ${socket.id}`);
+          
+          socket.emit("exam:autoSubmitted", {
+            examId,
+            message: "Exam was auto-submitted due to disconnection",
+          });
+          
+          console.log(`✅ Event emitted successfully`);
+        } else if (rows.length > 0) {
+          const disconnectedAt = rows[0].disconnected_at;
+          const endTime = rows[0].end_time;
+          const graceSeconds = rows[0].disconnect_grace_time || 0;
+          const { rows: nowRows } = await pool.query(`SELECT NOW() AS now`);
+          const now = nowRows[0].now;
+
+          const deadlineMs = endTime
+            ? new Date(endTime).getTime() + graceSeconds * 1000
+            : null;
+
+          if (deadlineMs && new Date(now).getTime() > deadlineMs) {
+            console.log(`🚨 Attempt exceeded end time. Auto-submitting exam ${examId} for user ${userId}`);
+            await autoSubmitExam(userId, examId);
+            socket.emit("exam:autoSubmitted", {
+              examId,
+              message: "Exam auto-submitted due to time expiry",
+            });
+            return;
+          }
+
+          if (disconnectedAt) {
+            const offlineSeconds = Math.floor((new Date(now).getTime() - new Date(disconnectedAt).getTime()) / 1000);
+
+            console.log(`⏱️ Offline duration: ${offlineSeconds}s (grace ${graceSeconds}s)`);
+
+            if (offlineSeconds > graceSeconds) {
+              console.log(`🚨 Offline grace exceeded. Auto-submitting exam ${examId} for user ${userId}`);
+              await autoSubmitExam(userId, examId);
+              socket.emit("exam:autoSubmitted", {
+                examId,
+                message: "Exam auto-submitted due to disconnection",
+              });
+            } else {
+              await pool.query(
+                `
+                UPDATE exam_attempts
+                SET disconnected_at = NULL
+                WHERE exam_id = $1 AND student_id = $2
+                `,
+                [examId, userId]
+              );
+              console.log(`✅ Reconnected within grace. Cleared disconnected_at.`);
+            }
+          } else {
+            console.log(`✓ Exam ${examId} not yet submitted, continuing normally`);
+          }
+        } else {
+          console.log(`⚠️ No attempt found for exam ${examId}, user ${userId}`);
+        }
+      } catch (err) {
+        console.error("❌ Error checking exam status on reconnect:", err);
       }
     });
 
@@ -97,55 +160,47 @@ export const initializeSocket = (httpServer) => {
     ========================= */
     socket.on("disconnect", async () => {
       console.log(`❌ User disconnected: ${socket.id}`);
+      console.log(`📍 Socket data - userId: ${socket.userId}, examId: ${socket.examId}`);
 
       const userId = socket.userId;
-      const examId = socket.examId;
 
-      if (!userId || !examId) {
-        console.log(`⚠️ Disconnect ignored - no userId or examId (userId: ${userId}, examId: ${examId})`);
+      if (!userId) {
+        console.log(`⚠️ Disconnect ignored - no userId`);
         return;
       }
 
-      const key = `${userId}_${examId}`;
-
       try {
-        // Fetch grace time
+        // Find ALL in-progress attempts for this user (not dependent on socket.examId)
         const { rows } = await pool.query(
-          `SELECT disconnect_grace_time FROM exams WHERE exam_id = $1`,
-          [examId]
+          `
+          SELECT exam_id FROM exam_attempts
+          WHERE student_id = $1 AND status = 'in_progress' AND disconnected_at IS NULL
+          `,
+          [userId]
         );
 
-        if (!rows.length) {
-          console.error(`❌ Exam ${examId} not found in database`);
+        if (rows.length === 0) {
+          console.log(`⚠️ No in-progress attempts found for user ${userId}`);
           return;
         }
 
-        const graceTime = rows[0]?.disconnect_grace_time || 120;
-
-        console.log(`⏳ Starting ${graceTime}s grace timer for ${userId} on exam ${examId}`);
-        console.log(`⏰ Timer will expire at: ${new Date(Date.now() + graceTime * 1000).toLocaleTimeString()}`);
-
-        const timeoutId = setTimeout(async () => {
-          console.log(`🚨 Grace time expired for ${userId} on exam ${examId} → Auto submitting`);
-
-          await autoSubmitExam(userId, examId);
-          activeExamSessions.delete(key);
-
-          if (io) {
-            io.to(userId).emit("exam:autoSubmitted", {
-              examId,
-              message: "Exam auto-submitted due to disconnection",
-            });
-            console.log(`📤 Sent exam:autoSubmitted event to user ${userId}`);
-          }
-
-        }, graceTime * 1000);
-
-        activeExamSessions.set(key, { timeoutId });
-        console.log(`📝 Stored timeout for key: ${key}`);
-
+        // Mark ALL in-progress attempts as disconnected
+        for (const row of rows) {
+          await pool.query(
+            `
+            UPDATE exam_attempts
+            SET disconnected_at = NOW()
+            WHERE exam_id = $1
+            AND student_id = $2
+            AND status = 'in_progress'
+            `,
+            [row.exam_id, userId]
+          );
+          console.log(`📝 Marked disconnected_at for user ${userId}, exam ${row.exam_id}`);
+        }
       } catch (err) {
-        console.error("Disconnect handling error:", err);
+        console.error("❌ Disconnect handling error:", err);
+        console.error(err.stack);
       }
     });
 

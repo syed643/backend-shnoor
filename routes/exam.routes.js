@@ -27,7 +27,9 @@ import {
   setExamGraceTimer,
   getAllExamsAdmin,
   saveAnswer,
-  createRewriteAttempt
+  createRewriteAttempt,
+  getExamStatus,
+  getExamAttempt
 } from "../controllers/exams/exam.controller.js";
 
 import { addDescriptiveQuestion } from "../controllers/exams/examdescriptive.controller.js";
@@ -182,6 +184,22 @@ router.post(
   attachUser,
   roleGuard("student", "learner"),
   createRewriteAttempt
+);
+
+router.get(
+  "/:examId/status",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner"),
+  getExamStatus
+);
+
+router.get(
+  "/:examId/attempt",
+  firebaseAuth,
+  attachUser,
+  roleGuard("student", "learner"),
+  getExamAttempt
 );
 
 export default router;

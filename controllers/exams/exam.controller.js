@@ -1,4 +1,5 @@
 import pool from "../../db/postgres.js";
+import { autoSubmitExam as autoSubmitExamInternal } from "./examSubmission.controller.js";
 
 export const createExam = async (req, res) => {
     try {
@@ -245,54 +246,24 @@ export const saveAnswer = async (req, res) => {
 };
 
 export const autoSubmitExam = async (studentId, examId) => {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    const { rows } = await client.query(
-      `
-      SELECT status
-      FROM exam_attempts
-      WHERE exam_id = $1
-      AND student_id = $2
-      `,
-      [examId, studentId]
-    );
-
-    if (!rows.length || rows[0].status === "submitted") {
-      await client.query("ROLLBACK");
-      return;
-    }
-
-    await client.query(
-      `
-      UPDATE exam_attempts
-      SET status = 'submitted',
-          submitted_at = NOW()
-      WHERE exam_id = $1
-      AND student_id = $2
-      `,
-      [examId, studentId]
-    );
-
-    await client.query("COMMIT");
-
-    console.log(`Auto-submitted exam ${examId} for student ${studentId}`);
-
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("Auto submit error:", err);
-  } finally {
-    client.release();
-  }
+  await autoSubmitExamInternal(studentId, examId);
 };
+
 export const createRewriteAttempt = async (req, res) => {
   const client = await pool.connect();
 
   try {
     const { examId } = req.params;
     const studentId = req.user.id;
+
+    const { rows: examRows } = await client.query(
+      `SELECT duration FROM exams WHERE exam_id = $1`,
+      [examId]
+    );
+
+    if (!examRows.length) {
+      return res.status(404).json({ message: "Exam not found" });
+    }
 
     await client.query("BEGIN");
 
@@ -308,14 +279,17 @@ export const createRewriteAttempt = async (req, res) => {
     // Reset attempt status to in_progress  
     await client.query(
       `
-      INSERT INTO exam_attempts (exam_id, student_id, status)
-      VALUES ($1, $2, 'in_progress')
+      INSERT INTO exam_attempts (exam_id, student_id, status, start_time, end_time)
+      VALUES ($1, $2, 'in_progress', NOW(), NOW() + ($3 * INTERVAL '1 minute'))
       ON CONFLICT (exam_id, student_id)
       DO UPDATE 
       SET status = 'in_progress',
-          submitted_at = NULL
+          submitted_at = NULL,
+          start_time = NOW(),
+          end_time = NOW() + ($3 * INTERVAL '1 minute'),
+          disconnected_at = NULL
       `,
-      [examId, studentId]
+      [examId, studentId, examRows[0].duration]
     );
 
     await client.query("COMMIT");
@@ -330,5 +304,69 @@ export const createRewriteAttempt = async (req, res) => {
     res.status(500).json({ message: "Failed to create rewrite attempt" });
   } finally {
     client.release();
+  }
+};
+
+export const getExamStatus = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+
+    const { rows } = await pool.query(
+      `SELECT status, submitted_at FROM exam_attempts WHERE exam_id = $1 AND student_id = $2`,
+      [examId, studentId]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ status: 'not_started' });
+    }
+
+    res.json({
+      status: rows[0].status,
+      submitted_at: rows[0].submitted_at
+    });
+  } catch (err) {
+    console.error("Get exam status error:", err);
+    res.status(500).json({ message: "Failed to get exam status" });
+  }
+};
+
+export const getExamAttempt = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+
+    const { rows } = await pool.query(
+      `
+      SELECT start_time, end_time, status, NOW() AS server_time
+      FROM exam_attempts
+      WHERE exam_id = $1 AND student_id = $2
+      `,
+      [examId, studentId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "Attempt not found" });
+    }
+
+    const response = {
+      start_time: rows[0].start_time?.toISOString(),
+      end_time: rows[0].end_time?.toISOString(),
+      server_time: rows[0].server_time?.toISOString(),
+      status: rows[0].status
+    };
+
+    console.log("📤 getExamAttempt response:", {
+      examId,
+      raw: rows[0],
+      converted: response,
+      duration_seconds: Math.floor((new Date(response.end_time) - new Date(response.start_time)) / 1000),
+      remaining_seconds: Math.floor((new Date(response.end_time) - new Date(response.server_time)) / 1000)
+    });
+
+    res.json(response);
+  } catch (err) {
+    console.error("Get exam attempt error:", err);
+    res.status(500).json({ message: "Failed to get exam attempt" });
   }
 };
